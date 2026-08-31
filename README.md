@@ -31,3 +31,17 @@ Every repository lookup requires `seller_id` and `marketplace_id`, preventing se
 `GET /api/listings/{asin}/history?limit=30` returns normalized snapshot history and its trend summary. It contains no credentials, headers, raw Amazon payload, or buyer data. Historical data lets a future AI component query changes through internal services rather than Amazon directly.
 
 SQLite is appropriate for this local MVP. A multi-user SaaS deployment should migrate the same seller-scoped schema and repository contract to PostgreSQL with managed backups and access controls.
+
+## Step 9 — Scheduled Snapshot Collection
+
+The read-only snapshot collector fetches Listings Items API pages, normalizes them through the existing listing service, and saves every observation to SQLite. It preserves the existing `changed` flag so unchanged observations remain useful checkpoints for reliable days-tracked calculations. One safe `snapshot_runs` row records counts and a sanitized error summary for every run; it never stores secrets or raw API payloads.
+
+Run one collection manually:
+
+```powershell
+python scripts/collect_listing_snapshots.py --max-pages 100 --page-size 10
+```
+
+`POST /api/internal/listings/snapshots/run` triggers the same cycle. It is internal-only and must be protected by application authentication before production use. Pagination stops when Amazon returns no next token or the configured max-pages safety limit is reached. A failed page stops safely; an individual snapshot failure is isolated and does not abort the other listings.
+
+No scheduler is included yet. Future deployment can call the reusable job from Windows Task Scheduler, cron, or AWS Lambda/EventBridge without changing its collection logic. Amazon access remains read-only.
