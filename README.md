@@ -236,3 +236,11 @@ The dashboard exposes a compact manual Sync panel. Its button is disabled whenev
 Manual sync runs now flow through the scoped sync repository into deterministic health classification and authenticated visibility APIs. Health states include `healthy`, `idle`, `running`, `degraded`, `failing`, `blocked`, `stale`, and `never_synced`. The observability service reports only safe run metadata, row counts, error codes, time-window totals, success rate, cooldown, blocked reason, and stale-run state.
 
 `GET /api/ads/sync/observability` and `GET /api/ads/sync/history?limit=20` are authenticated read-only routes. The Seller Action Center shows Sync Health plus recent runs, safe errors, and counts. Retry remains the existing CSRF-protected manual `POST /api/ads/sync` route; no bypass, forced unlock, scheduler, AWS change, or Ads write capability is introduced.
+
+## Step 19A.11 — Ads Performance Intelligence Dashboard
+
+The authenticated `GET /api/ads/intelligence?window=30&limit=10` endpoint combines normalized, seller/profile-scoped historical Ads records with deterministic recommendations, human-review decisions, and sync health. It supports 7, 14, 30, 60, and 90 day windows.
+
+The response aggregates base metrics first and then derives CTR, CPC, CVR, ACOS, and ROAS with Decimal-safe calculations. It includes chronological observed-day trend points (days without data are omitted consistently), a previous-period comparison with safe unavailable values for zero denominators, deterministic campaign/keyword/search-term rankings, recommendation counts, and review-outcome counts.
+
+The Seller Dashboard adds an Amazon Ads Intelligence panel with KPI cards, a window selector, observed-day trend table, ranked performance summaries, and the explicit notice that approved recommendations are only approved for possible future execution. This phase is analytics only: it makes no Amazon Ads writes, has no scheduler, and never auto-executes an approved recommendation.

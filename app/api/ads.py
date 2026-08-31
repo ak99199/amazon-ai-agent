@@ -18,6 +18,7 @@ from app.amazon_ads.live_read import AdsLiveReadConfig
 from app.services.ads_sync_gate_service import AdsSyncGateService
 from app.services.ads_manual_sync_service import AdsManualSyncService
 from app.services.ads_sync_observability_service import AdsSyncObservabilityService
+from app.services.ads_intelligence_service import AdsIntelligenceService
 from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
 from app.services.ads_recommendation_service import AdsRecommendationService
@@ -95,6 +96,19 @@ def recommendations(window: int = Query(30), scope_type: str | None = Query(None
     except (ConfigurationError, Exception):
         raise HTTPException(503, "Ads recommendations are unavailable") from None
 
+
+@router.get("/intelligence")
+def intelligence(window: int = Query(30), limit: int = Query(10, ge=1, le=50)):
+    if window not in AdsIntelligenceService.allowed_windows:
+        raise HTTPException(422, "Unsupported Ads intelligence window")
+    try:
+        context = _context(); repository, _, _ = _services()
+        profile_id = AdsSettings.from_environment().profile_id
+        return AdsIntelligenceService(repository).get(context.seller_id, context.marketplace_id, profile_id, window, limit).public_dict()
+    except ValueError:
+        raise HTTPException(422, "Invalid Ads intelligence request") from None
+    except Exception:
+        raise HTTPException(503, "Ads intelligence is unavailable") from None
 
 @router.get("/actions")
 def actions(window: int = Query(30), status: str | None = Query(None), priority: str | None = Query(None), limit: int = Query(50, ge=1, le=200)):

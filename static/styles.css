@@ -11,3 +11,5 @@ body{font-family:Arial,sans-serif;background:#f4f6fa;color:#172033;margin:0}main
 .ads-sync-button:disabled{opacity:.55;cursor:not-allowed}
 
 .sync-health .alert-row{gap:.75rem}
+
+.ads-intelligence h3{margin-top:1.25rem}.intelligence-windows{display:flex;gap:.5rem;margin:.5rem 0 1rem}.intelligence-windows a{padding:.35rem .65rem;border:1px solid #ccd3df;border-radius:999px;text-decoration:none;color:#172033}.intelligence-windows a.selected{background:#172033;color:#fff}.intelligence-table{margin:.75rem 0}.intelligence-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}.intelligence-grid>div{padding:.75rem;background:#f8fafc;border-radius:8px}.intelligence-grid p{font-size:.9rem}
