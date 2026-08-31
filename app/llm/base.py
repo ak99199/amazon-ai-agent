@@ -1,0 +1,3 @@
+from typing import Protocol
+class ExplanationProvider(Protocol):
+    def explain(self,payload:dict)->dict: ...

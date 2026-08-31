@@ -76,3 +76,11 @@ Recommendations follow a deterministic chain: repository → Listing Intelligenc
 Actions include `KEEP_STABLE`, `WAIT_FOR_MORE_DATA`, `REVIEW_TITLE`, `CHECK_LISTING_STATUS`, `REVIEW_PRICE_VOLATILITY`, `REVIEW_FULFILLMENT`, `INVESTIGATE_RECENT_CHANGE`, and `MONITOR_LISTING`. Risk flags map directly to seller-friendly recommendations with low, medium, high, or critical priority. Insufficient history remains low priority; unstable status and multiple high-risk signals raise priority.
 
 Recommendations are deterministic historical guidance only. They do not modify Amazon, predict sales or profit, or replace seller review. A human must review any recommendation before making a change in Seller Central.
+
+## Step 13 — LLM Explanation Layer
+
+The deterministic recommendation engine remains the source of truth. The optional explanation layer only converts its normalized actions into concise seller-facing text. `GET /api/listings/{asin}/explanation?window=30` uses deterministic fallback whenever no provider is configured, a provider fails, or its output fails validation.
+
+Set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` only in the runtime environment to enable the OpenAI provider. No key is required for the application to work. The provider receives only normalized recommendation data; it never receives Amazon credentials, tokens, headers, raw API payloads, or buyer data.
+
+LLM output must preserve the deterministic overall action, priority, action ordering, and action codes. Invalid output is rejected. The LLM explains recommendations; it does not decide or execute Amazon actions, predict sales/profit, or suggest autonomous writes.
