@@ -84,3 +84,9 @@ The deterministic recommendation engine remains the source of truth. The optiona
 Set `OPENAI_API_KEY` and optionally `OPENAI_MODEL` only in the runtime environment to enable the OpenAI provider. No key is required for the application to work. The provider receives only normalized recommendation data; it never receives Amazon credentials, tokens, headers, raw API payloads, or buyer data.
 
 LLM output must preserve the deterministic overall action, priority, action ordering, and action codes. Invalid output is rejected. The LLM explains recommendations; it does not decide or execute Amazon actions, predict sales/profit, or suggest autonomous writes.
+
+## Step 14 — Consolidated Seller Insights API
+
+`GET /api/listings/{asin}/insights?window=30` combines the latest normalized listing snapshot, windowed history summary, deterministic intelligence, deterministic recommendations, and the validated explanation layer. It reuses existing services and does not duplicate their scoring or action rules.
+
+The response is suitable for a seller dashboard and remains strictly read-only. It excludes listing hashes, credentials, tokens, headers, raw Amazon payloads, and buyer data. Empty, partial, and missing-price history returns safe null/default values. Insights are historical operational context, not sales, profit, or demand prediction.

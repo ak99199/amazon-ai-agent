@@ -57,3 +57,15 @@ def get_listing_explanation(asin:str,window:str=Query("30",pattern="^(7|30|60|90
     intelligence=ListingIntelligenceService(ListingSnapshotRepository()).analyze(settings.seller_id or "",settings.marketplace_id or "",asin,window)
     recommendation=ListingRecommendationService().recommend(intelligence)
     return RecommendationExplanationService.from_environment().explain(recommendation).public_dict()
+
+@router.get("/listings/{asin}/insights")
+def get_listing_insights(asin:str,window:str=Query("30",pattern="^(7|30|60|90|all)$")):
+    from app.services.listing_intelligence_service import ListingIntelligenceService
+    from app.services.listing_recommendation_service import ListingRecommendationService
+    from app.services.recommendation_explanation_service import RecommendationExplanationService
+    from app.services.listing_insights_service import ListingInsightsService
+    settings=Settings.from_environment()
+    try: settings.require_complete()
+    except ConfigurationError: raise HTTPException(503,"Amazon listing connection is not configured") from None
+    repository=ListingSnapshotRepository(); intelligence=ListingIntelligenceService(repository)
+    return ListingInsightsService(repository,intelligence,ListingRecommendationService(),RecommendationExplanationService.from_environment()).get_insights(settings.seller_id or "",settings.marketplace_id or "",asin,window).public_dict()
