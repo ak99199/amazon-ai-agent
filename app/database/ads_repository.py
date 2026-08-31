@@ -28,6 +28,20 @@ class AdsPerformanceRepository:
     def list_ingestion_runs(self,seller_id,marketplace_id,profile_id,limit=30):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_ingestion_runs WHERE seller_id=? AND marketplace_id=? AND profile_id=? ORDER BY started_at DESC LIMIT ?",(seller_id,marketplace_id,str(profile_id),max(1,min(limit,100)))).fetchall()
+    def count_performance_rows(self,seller_id,marketplace_id,profile_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT COUNT(*) FROM ads_performance_daily WHERE seller_id=? AND marketplace_id=? AND profile_id=?",(seller_id,marketplace_id,str(profile_id))).fetchone()[0]
+    def get_data_date_range(self,seller_id,marketplace_id,profile_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT MIN(date),MAX(date) FROM ads_performance_daily WHERE seller_id=? AND marketplace_id=? AND profile_id=?",(seller_id,marketplace_id,str(profile_id))).fetchone()
+    def count_ingestion_runs(self,seller_id,marketplace_id,profile_id,success=None):
+        self.initialize();clause="" if success is None else " AND success=?";values=(seller_id,marketplace_id,str(profile_id)) if success is None else (seller_id,marketplace_id,str(profile_id),int(success))
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT COUNT(*) FROM ads_ingestion_runs WHERE seller_id=? AND marketplace_id=? AND profile_id=?"+clause,values).fetchone()[0]
+    def get_latest_ingestion_run(self,seller_id,marketplace_id,profile_id):
+        rows=self.list_ingestion_runs(seller_id,marketplace_id,profile_id,1);return rows[0] if rows else None
+    def get_latest_successful_ingestion_run(self,seller_id,marketplace_id,profile_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_ingestion_runs WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND success=1 ORDER BY started_at DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id))).fetchone()
     def list_rows(self,seller_id,marketplace_id,profile_id,start_date,end_date,campaign_id=None,keyword_id=None,search_term=None,today=None):
         today=today or date.today()
         if start_date>end_date or end_date>today:raise ValueError("Ads query date range is invalid")
