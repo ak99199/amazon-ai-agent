@@ -90,3 +90,9 @@ LLM output must preserve the deterministic overall action, priority, action orde
 `GET /api/listings/{asin}/insights?window=30` combines the latest normalized listing snapshot, windowed history summary, deterministic intelligence, deterministic recommendations, and the validated explanation layer. It reuses existing services and does not duplicate their scoring or action rules.
 
 The response is suitable for a seller dashboard and remains strictly read-only. It excludes listing hashes, credentials, tokens, headers, raw Amazon payloads, and buyer data. Empty, partial, and missing-price history returns safe null/default values. Insights are historical operational context, not sales, profit, or demand prediction.
+
+## Step 15 — Portfolio Insights
+
+`GET /api/portfolio/insights` provides a seller-wide, read-only dashboard summary by reusing the existing per-listing insights service. It supports `window`, `sort` (`risk_desc`, `opportunity_desc`, `recent_change`, `stability_desc`), `priority`, `status`, `confidence`, `changed_recently`, `min_risk_score`, and a bounded `limit` up to 200.
+
+The response contains aggregate portfolio counts/averages and normalized per-ASIN summaries only. No listing hash, credentials, tokens, raw Amazon data, or buyer information is exposed. Portfolio metrics are historical operational context, not a sales or profit prediction.

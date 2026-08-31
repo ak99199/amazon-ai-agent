@@ -69,3 +69,16 @@ def get_listing_insights(asin:str,window:str=Query("30",pattern="^(7|30|60|90|al
     except ConfigurationError: raise HTTPException(503,"Amazon listing connection is not configured") from None
     repository=ListingSnapshotRepository(); intelligence=ListingIntelligenceService(repository)
     return ListingInsightsService(repository,intelligence,ListingRecommendationService(),RecommendationExplanationService.from_environment()).get_insights(settings.seller_id or "",settings.marketplace_id or "",asin,window).public_dict()
+
+@router.get("/portfolio/insights")
+def get_portfolio_insights(window:str=Query("30",pattern="^(7|30|60|90|all)$"),sort:str=Query("risk_desc",pattern="^(risk_desc|opportunity_desc|recent_change|stability_desc)$"),priority:str|None=None,status:str|None=None,confidence:str|None=None,changed_recently:bool|None=None,min_risk_score:int|None=Query(None,ge=0,le=100),limit:int=Query(50,ge=1,le=200)):
+    from app.services.listing_intelligence_service import ListingIntelligenceService
+    from app.services.listing_recommendation_service import ListingRecommendationService
+    from app.services.recommendation_explanation_service import RecommendationExplanationService
+    from app.services.listing_insights_service import ListingInsightsService
+    from app.services.portfolio_insights_service import PortfolioInsightsService
+    settings=Settings.from_environment()
+    try: settings.require_complete()
+    except ConfigurationError: raise HTTPException(503,"Amazon listing connection is not configured") from None
+    repository=ListingSnapshotRepository(); insights=ListingInsightsService(repository,ListingIntelligenceService(repository),ListingRecommendationService(),RecommendationExplanationService.from_environment())
+    return PortfolioInsightsService(repository,insights).get_portfolio(settings.seller_id or "",settings.marketplace_id or "",window,sort,priority,status,confidence,changed_recently,min_risk_score,limit).public_dict()

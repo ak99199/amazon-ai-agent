@@ -21,6 +21,8 @@ class DynamoDbSnapshotRepository:
         return [self._to_snapshot(item) for item in response.get("Items",[]) if item.get("seller_marketplace_asin","").startswith(prefix) and item.get("changed") and item.get("captured_at","") >= since_timestamp.isoformat()]
     def count_snapshots(self,seller_id,marketplace_id):
         response=self._snapshots.scan(); prefix=f"{seller_id}#{marketplace_id}#"; return sum(1 for item in response.get("Items",[]) if item.get("seller_marketplace_asin","").startswith(prefix))
+    def list_tracked_asins(self,seller_id,marketplace_id):
+        prefix=f"{seller_id}#{marketplace_id}#"; return sorted({item.get("asin") for item in self._snapshots.scan().get("Items",[]) if item.get("seller_marketplace_asin","").startswith(prefix) and item.get("asin")})
     def save_snapshot_run(self,result):
         run_id=str(uuid4()); self._runs.put_item(Item={"run_id":run_id,"started_at":result.started_at.isoformat(),"finished_at":result.finished_at.isoformat(),"success":result.success,"listings_fetched":result.listings_fetched,"snapshots_saved":result.snapshots_saved,"changed_count":result.changed_count,"unchanged_count":result.unchanged_count,"failed_count":result.failed_count,"pages_processed":result.pages_processed,"error_summary":"; ".join(result.errors) or None}); return run_id
     def _key(self,name):
@@ -34,3 +36,4 @@ class DynamoDbSnapshotRepository:
     @staticmethod
     def _to_snapshot(item):
         return ListingSnapshot(None,item["seller_id"],item["marketplace_id"],datetime.fromisoformat(item["captured_at"]),item["sku"],item["asin"],item.get("title"),item.get("brand"),item.get("product_type"),item.get("condition"),item.get("listing_status"),item.get("price"),item.get("currency"),item.get("fulfillment_channel"),item["listing_hash"],bool(item["changed"]))
+

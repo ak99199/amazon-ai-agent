@@ -22,6 +22,10 @@ class ListingSnapshotRepository:
         with get_connection(self._database_path) as connection: return connection.execute("INSERT INTO snapshot_runs (started_at,finished_at,success,listings_fetched,snapshots_saved,changed_count,unchanged_count,failed_count,pages_processed,error_summary) VALUES (?,?,?,?,?,?,?,?,?,?)",values).lastrowid
     def count_snapshot_runs(self):
         with get_connection(self._database_path) as connection: return connection.execute("SELECT COUNT(*) FROM snapshot_runs").fetchone()[0]
+    def list_tracked_asins(self,seller_id,marketplace_id):
+        with get_connection(self._database_path) as connection: rows=connection.execute("SELECT DISTINCT asin FROM listing_snapshots WHERE seller_id=? AND marketplace_id=? ORDER BY asin",(seller_id,marketplace_id)).fetchall()
+        return [row[0] for row in rows]
     def _query(self,query,params):
         with get_connection(self._database_path) as connection: rows=connection.execute(query,params).fetchall()
         return [ListingSnapshot(row["id"],row["seller_id"],row["marketplace_id"],datetime.fromisoformat(row["captured_at"]),row["sku"],row["asin"],row["title"],row["brand"],row["product_type"],row["condition"],row["listing_status"],row["price"],row["currency"],row["fulfillment_channel"],row["listing_hash"],bool(row["changed"])) for row in rows]
+
