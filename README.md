@@ -45,3 +45,17 @@ python scripts/collect_listing_snapshots.py --max-pages 100 --page-size 10
 `POST /api/internal/listings/snapshots/run` triggers the same cycle. It is internal-only and must be protected by application authentication before production use. Pagination stops when Amazon returns no next token or the configured max-pages safety limit is reached. A failed page stops safely; an individual snapshot failure is isolated and does not abort the other listings.
 
 No scheduler is included yet. Future deployment can call the reusable job from Windows Task Scheduler, cron, or AWS Lambda/EventBridge without changing its collection logic. Amazon access remains read-only.
+
+## Step 10 — AWS Scheduled Snapshot Deployment
+
+Local development retains SQLite. AWS Lambda uses DynamoDB through the same snapshot repository contract: EventBridge Scheduler → Lambda → read-only Amazon SP-API → SnapshotCollector → DynamoDB. Lambda does not use SQLite or durable `/tmp` storage.
+
+Set these Lambda environment variables: `SECRET_ARN`, `SELLER_ID`, `MARKETPLACE_ID`, `STORAGE_BACKEND=dynamodb`, `DYNAMODB_SNAPSHOTS_TABLE`, and `DYNAMODB_RUNS_TABLE`. The referenced Secrets Manager JSON contains only `SP_API_CLIENT_ID`, `SP_API_CLIENT_SECRET`, and `SP_API_REFRESH_TOKEN`. Values are loaded at runtime and never returned or logged.
+
+The snapshot table partition key is `seller_marketplace_asin` (`seller_id#marketplace_id#asin`) with sort key `captured_at`. The run table uses `run_id`. Both store normalized data only. Lambda handler: `lambda_handler.lambda_handler`. EventBridge Scheduler configuration is a manual post-deployment step.
+
+Build a deployment ZIP only; this never uploads or creates AWS resources:
+
+```powershell
+.\deploy\build_lambda.ps1
+```
