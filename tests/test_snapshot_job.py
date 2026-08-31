@@ -6,6 +6,7 @@ from datetime import datetime,timezone
 class Collector:
     def collect(self,*args): return CollectionResult(datetime.now(timezone.utc),datetime.now(timezone.utc),1,1,1,0,0,1,True,())
 def test_job_is_reusable(monkeypatch):
+    monkeypatch.delenv("ALERTS_ENABLED",raising=False)
     class Settings:
         seller_id="seller"; marketplace_id="market"
         def require_complete(self): return self

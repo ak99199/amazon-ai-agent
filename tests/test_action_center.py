@@ -50,6 +50,7 @@ def _install_dashboard_fakes(monkeypatch, listings):
 def test_action_center_orders_actions_and_uses_friendly_labels(monkeypatch):
     configure_admin(monkeypatch)
     _install_dashboard_fakes(monkeypatch, [_listing("BLOW", "low", 5), _listing("BHIGH", "high", 80), _listing("BCRIT", "critical", 90)])
+    monkeypatch.setattr(routes, "_recent_alerts", lambda context: (1, [{"severity":"high","asin":"BCRIT","title":"High-risk listing detected","created_at":"2026-01-01"}]))
     client = TestClient(app)
     login(client)
 
@@ -57,6 +58,7 @@ def test_action_center_orders_actions_and_uses_friendly_labels(monkeypatch):
 
     assert response.status_code == 200
     assert "Today's Action Center" in response.text
+    assert "Alerts" in response.text and "High-risk listing detected" in response.text
     assert "Check Listing Status" in response.text
     assert response.text.index("BCRIT") < response.text.index("BHIGH") < response.text.index("BLOW")
     assert ">2</strong>" in response.text  # critical and high need attention
@@ -75,6 +77,7 @@ def test_action_center_filters_are_deterministic():
 def test_listing_detail_has_action_center_sections_and_handles_missing_values(monkeypatch):
     configure_admin(monkeypatch)
     _install_dashboard_fakes(monkeypatch, [_listing("B0001", "critical", 90, "")])
+    monkeypatch.setattr(routes, "_recent_alerts", lambda context: (1, [{"severity":"high","asin":"BCRIT","title":"High-risk listing detected","created_at":"2026-01-01"}]))
     client = TestClient(app)
     login(client)
 

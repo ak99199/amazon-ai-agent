@@ -128,3 +128,21 @@ The protected `/dashboard` page is now a read-only daily Action Center. It prior
 The dashboard includes portfolio KPIs, including a deterministic **Needs attention** count for critical and high-priority recommendations. Its filters retain the portfolio priority, status, confidence, sort, and changed-recently controls, and add risk level and needs-attention filtering. The listing table has responsive layout, readable badges, truncated product titles, safe missing-value states, and direct ASIN links.
 
 Listing detail pages now group normalized current listing data, historical intelligence, deterministic recommended actions, an optional clearly-labelled AI explanation, and recent snapshot history. The AI explanation is contextual only: it is not a prediction and never changes an action or makes an Amazon update. All dashboard data remains authenticated, seller-scoped, read-only, and excludes secrets, hashes, raw Amazon payloads, and buyer information. Human review remains required before any Seller Central action.
+
+## Step 18B — Alerts Foundation
+
+The alerts foundation is a deterministic, seller-scoped internal notification layer that can be reused by future Amazon Ads workflows. It evaluates normalized listing intelligence and recommendations only: inactive listings, high risk, high/critical recommendations, recent major changes, fulfillment instability, and important price volatility. An LLM never decides whether an alert exists.
+
+Each alert is stored independently from listing snapshots with a stable dedupe key based on seller, marketplace, ASIN, alert type, and relevant normalized state. Local development uses the existing SQLite database. Production can use a separate DynamoDB table with `seller_marketplace` as partition key and `created_at_alert_id` as sort key, configured through `DYNAMODB_ALERTS_TABLE`. The table is not created automatically.
+
+`GET /api/alerts` supports optional `status` (`new`, `sent`, `dismissed`) and `severity` filters. `POST /api/alerts/{alert_id}/dismiss` changes only the internal alert status and requires the existing authenticated session plus CSRF header. Both routes are read-only with respect to Amazon.
+
+Set `ALERTS_ENABLED=true` and `ALERT_NOTIFICATION_PROVIDER=log` for a safe development notification sink. Optional SNS delivery additionally requires `ALERT_NOTIFICATION_PROVIDER=sns` and `ALERT_SNS_TOPIC_ARN`; only normalized alert title and message are sent. No topic, subscription, or AWS permission is created by this project. Future production flow: snapshot Lambda → deterministic alert evaluation → DynamoDB alerts table → optional SNS → seller-managed email/SMS subscription. Human review is always required.
+
+## Step 18B.1 — Snapshot Alert Evaluation
+
+The existing scheduled snapshot Lambda now evaluates alerts only after a successful read-only collection run. The integration is in `run_listing_snapshot_job`: it selects seller-scoped listings changed in that run, reuses `ListingIntelligenceService` and `ListingRecommendationService`, then passes their normalized output to `AlertService`. It does not duplicate scoring or recommendation rules and does not make any Amazon write.
+
+Set `ALERTS_ENABLED=true` on the snapshot Lambda to activate evaluation. Set `DYNAMODB_ALERTS_TABLE` to a separately provisioned table using `seller_marketplace` as its partition key and `created_at_alert_id` as its sort key. `ALERT_NOTIFICATION_PROVIDER` is optional; without it, alerts are stored but no notification is sent. Configure `log` for safe logging, or `sns` with `ALERT_SNS_TOPIC_ARN` for optional SNS delivery. The web Lambda only reads alerts and never evaluates or sends them.
+
+Alert evaluation and notification failures are isolated: they log only the exception type and leave a successful snapshot collection successful. The snapshot Lambda requires alerts-table `dynamodb:GetItem`, `dynamodb:PutItem`, `dynamodb:Query`, and `dynamodb:Scan` as applicable to the repository; SNS requires `sns:Publish` only when enabled. The web Lambda needs only read permissions (`dynamodb:GetItem`, `dynamodb:Query`, `dynamodb:Scan`) for the alerts table. IAM resources and policies are not created or changed automatically.
