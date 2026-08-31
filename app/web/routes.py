@@ -14,6 +14,7 @@ from app.services.ads_action_service import AdsActionService
 from app.services.ads_execution_plan_service import AdsExecutionPlanService
 from app.services.ads_sync_gate_service import AdsSyncGateService
 from app.services.ads_manual_sync_service import AdsManualSyncService
+from app.services.ads_sync_observability_service import AdsSyncObservabilityService
 from app.amazon_ads.config import AdsSettings
 from app.amazon_ads.live_read import AdsLiveReadConfig
 from app.services.listing_intelligence_service import ListingIntelligenceService
@@ -62,6 +63,10 @@ def _ads_sync(context):
   repository=AdsPerformanceRepository();service=AdsManualSyncService(AdsSyncGateService(AdsSettings.from_environment(),repository,AdsLiveReadConfig.from_environment()),repository)
   return {**service.status(context.seller_id,context.marketplace_id),"unavailable":False}
  except Exception:return {"gate":{"allowed":False,"mode":None,"status_code":"error","status_message":"Ads sync unavailable."},"latest_sync":None,"unavailable":True}
+def _ads_sync_health(context):
+ try:
+  repository=AdsPerformanceRepository();gate=AdsSyncGateService(AdsSettings.from_environment(),repository,AdsLiveReadConfig.from_environment());return {**AdsSyncObservabilityService(repository,gate).get(context.seller_id,context.marketplace_id).public_dict(),"unavailable":False}
+ except Exception:return {"health_status":"error","recent_runs":[],"unavailable":True}
 def _recent_alerts(context):
  try:
   repository=create_alert_repository();return repository.count_alerts(context.seller_id,context.marketplace_id,"new"),[item.public_dict() for item in repository.list_alerts(context.seller_id,context.marketplace_id,limit=5)]
@@ -69,9 +74,9 @@ def _recent_alerts(context):
 @router.get("/dashboard",response_class=HTMLResponse)
 def dashboard(request:Request,window:str="30",sort:str="risk_desc",priority:str|None=None,status:str|None=None,confidence:str|None=None,risk_level:str|None=None,changed_recently:bool|None=None,needs_attention:bool=False):
  try:
-  context,(repo,portfolio,_)=_context();data=portfolio.get_portfolio(context.seller_id,context.marketplace_id,window,sort,priority,status,confidence,changed_recently,None,200).public_dict();data["listings"]=_apply_ui_filters(data["listings"],risk_level,needs_attention);attention=sum(row["priority"] in ("critical","high") for row in data["listings"]);actions=sorted(data["listings"],key=lambda row:({"critical":0,"high":1,"medium":2,"low":3}.get(row["priority"],4),-row["risk_score"],row["asin"]));new_alert_count,recent_alerts=_recent_alerts(context);ads_readiness=_ads_readiness(context);ads_recommendations=_ads_recommendations(context);ads_actions=_ads_actions(context);ads_execution_plans=_ads_execution_plans(context);ads_sync=_ads_sync(context);error=None
- except Exception:data=_empty();actions=[];attention=0;new_alert_count=0;recent_alerts=[];ads_readiness={"overall_status":"error","unavailable":True};ads_recommendations={"recommendations":[],"count":0,"high_count":0,"unavailable":True};ads_actions={"actions":[],"count":0,"pending_count":0,"approved_count":0,"rejected_count":0,"dismissed_count":0,"unavailable":True};ads_execution_plans={"plans":[],"unavailable":True};ads_sync={"gate":{"allowed":False,"mode":None,"status_code":"error","status_message":"Ads sync unavailable."},"latest_sync":None,"unavailable":True};error="Listing history is not configured or is not available yet."
- return templates.TemplateResponse(request,"dashboard.html",{"portfolio":data,"actions":actions,"needs_attention":attention,"new_alert_count":new_alert_count,"recent_alerts":recent_alerts,"ads_readiness":ads_readiness,"ads_recommendations":ads_recommendations,"ads_actions":ads_actions,"ads_execution_plans":ads_execution_plans,"ads_sync":ads_sync,"error":error,"window":window,"sort":sort,"priority":priority or "","status":status or "","confidence":confidence or "","risk_level":risk_level or "","changed_recently":changed_recently,"csrf_token":csrf_token(request)})
+  context,(repo,portfolio,_)=_context();data=portfolio.get_portfolio(context.seller_id,context.marketplace_id,window,sort,priority,status,confidence,changed_recently,None,200).public_dict();data["listings"]=_apply_ui_filters(data["listings"],risk_level,needs_attention);attention=sum(row["priority"] in ("critical","high") for row in data["listings"]);actions=sorted(data["listings"],key=lambda row:({"critical":0,"high":1,"medium":2,"low":3}.get(row["priority"],4),-row["risk_score"],row["asin"]));new_alert_count,recent_alerts=_recent_alerts(context);ads_readiness=_ads_readiness(context);ads_recommendations=_ads_recommendations(context);ads_actions=_ads_actions(context);ads_execution_plans=_ads_execution_plans(context);ads_sync=_ads_sync(context);ads_sync_health=_ads_sync_health(context);error=None
+ except Exception:data=_empty();actions=[];attention=0;new_alert_count=0;recent_alerts=[];ads_readiness={"overall_status":"error","unavailable":True};ads_recommendations={"recommendations":[],"count":0,"high_count":0,"unavailable":True};ads_actions={"actions":[],"count":0,"pending_count":0,"approved_count":0,"rejected_count":0,"dismissed_count":0,"unavailable":True};ads_execution_plans={"plans":[],"unavailable":True};ads_sync={"gate":{"allowed":False,"mode":None,"status_code":"error","status_message":"Ads sync unavailable."},"latest_sync":None,"unavailable":True};ads_sync_health={"health_status":"error","recent_runs":[],"unavailable":True};error="Listing history is not configured or is not available yet."
+ return templates.TemplateResponse(request,"dashboard.html",{"portfolio":data,"actions":actions,"needs_attention":attention,"new_alert_count":new_alert_count,"recent_alerts":recent_alerts,"ads_readiness":ads_readiness,"ads_recommendations":ads_recommendations,"ads_actions":ads_actions,"ads_execution_plans":ads_execution_plans,"ads_sync":ads_sync,"ads_sync_health":ads_sync_health,"error":error,"window":window,"sort":sort,"priority":priority or "","status":status or "","confidence":confidence or "","risk_level":risk_level or "","changed_recently":changed_recently,"csrf_token":csrf_token(request)})
 @router.get("/dashboard/listings/{asin}",response_class=HTMLResponse)
 def listing_detail(request:Request,asin:str,window:str="30"):
  try:

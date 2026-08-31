@@ -17,6 +17,7 @@ from app.services.ads_live_read_service import AdsLiveReadService, AdsLiveReadBl
 from app.amazon_ads.live_read import AdsLiveReadConfig
 from app.services.ads_sync_gate_service import AdsSyncGateService
 from app.services.ads_manual_sync_service import AdsManualSyncService
+from app.services.ads_sync_observability_service import AdsSyncObservabilityService
 from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
 from app.services.ads_recommendation_service import AdsRecommendationService
@@ -230,3 +231,18 @@ def sync(payload: SyncRequest):
         raise HTTPException(422,"Invalid Ads sync date range") from None
     except Exception:
         raise HTTPException(503,"Ads sync is unavailable") from None
+@router.get("/sync/observability")
+def sync_observability(limit:int=Query(20,ge=1,le=100)):
+    try:
+        context=_context();repository,_,_=_services();settings=AdsSettings.from_environment();gate=AdsSyncGateService(settings,repository,AdsLiveReadConfig.from_environment())
+        return AdsSyncObservabilityService(repository,gate).get(context.seller_id,context.marketplace_id,limit=limit).public_dict()
+    except Exception:
+        raise HTTPException(503,"Ads sync health is unavailable") from None
+
+@router.get("/sync/history")
+def sync_history(limit:int=Query(20,ge=1,le=100)):
+    try:
+        context=_context();repository,_,_=_services();profile_id=AdsSettings.from_environment().profile_id
+        return {"runs":[item.public_dict() for item in repository.list_sync_runs(context.seller_id,context.marketplace_id,profile_id,limit)]}
+    except Exception:
+        raise HTTPException(503,"Ads sync history is unavailable") from None

@@ -164,14 +164,29 @@ class AdsPerformanceRepository:
         return run
     def latest_sync_run(self,seller_id,marketplace_id,profile_id):
         self.initialize()
-        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? ORDER BY started_at DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None)).fetchone()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? ORDER BY started_at DESC, rowid DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None)).fetchone()
     def list_sync_runs(self,seller_id,marketplace_id,profile_id,limit=20):
         self.initialize()
-        with get_connection(self._database_path) as connection:rows=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? ORDER BY started_at DESC LIMIT ?",(seller_id,marketplace_id,str(profile_id) if profile_id else None,max(1,min(limit,100)))).fetchall()
+        with get_connection(self._database_path) as connection:rows=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? ORDER BY started_at DESC, rowid DESC LIMIT ?",(seller_id,marketplace_id,str(profile_id) if profile_id else None,max(1,min(limit,100)))).fetchall()
         return [self._sync_run(row) for row in rows]
     def has_active_sync(self,seller_id,marketplace_id,profile_id,not_before):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT 1 FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND status IN ('starting','running') AND started_at>=? LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None,not_before.isoformat())).fetchone() is not None
+    def active_sync_run(self,seller_id,marketplace_id,profile_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND status IN ('starting','running') ORDER BY started_at DESC, rowid DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None)).fetchone()
+    def latest_successful_sync(self,seller_id,marketplace_id,profile_id):return self._latest_sync_by_success(seller_id,marketplace_id,profile_id,True)
+    def latest_failed_sync(self,seller_id,marketplace_id,profile_id):return self._latest_sync_by_success(seller_id,marketplace_id,profile_id,False)
+    def _latest_sync_by_success(self,seller_id,marketplace_id,profile_id,success):
+        self.initialize()
+        with get_connection(self._database_path) as connection:row=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND success=? ORDER BY started_at DESC, rowid DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None,int(success))).fetchone()
+        return self._sync_run(row) if row else None
+    def count_sync_runs_since(self,seller_id,marketplace_id,profile_id,since):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT COUNT(*) FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND started_at>=?",(seller_id,marketplace_id,str(profile_id) if profile_id else None,since.isoformat())).fetchone()[0]
+    def aggregate_sync_counts_since(self,seller_id,marketplace_id,profile_id,since):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT COALESCE(SUM(rows_saved),0),COALESCE(SUM(rows_failed),0) FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND started_at>=?",(seller_id,marketplace_id,str(profile_id) if profile_id else None,since.isoformat())).fetchone()
     @staticmethod
     def _sync_run(item):
         return AdsManualSyncResult(item["sync_id"],item["mode"],item["seller_id"],item["marketplace_id"],item["profile_id"],date.fromisoformat(item["start_date"]),date.fromisoformat(item["end_date"]),datetime.fromisoformat(item["started_at"]),datetime.fromisoformat(item["finished_at"]) if item["finished_at"] else None,bool(item["success"]),item["status"],item["campaigns_fetched"],item["ad_groups_fetched"],item["keywords_fetched"],item["targets_fetched"],item["report_rows_received"],item["rows_normalized"],item["rows_saved"],item["rows_failed"],item["error_code"],item["error_summary"])

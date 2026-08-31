@@ -230,3 +230,9 @@ Manual Ads synchronization is now guarded by deterministic server-side readiness
 `POST /api/ads/sync` is authenticated and CSRF protected and accepts only a bounded server-side date range or `window_days` (1–90). It never accepts credentials or profile secrets from the request. `GET /api/ads/sync/status` and `GET /api/ads/sync-runs` provide safe gate/run diagnostics. Sync runs are persisted in `ads_sync_runs`, scoped by seller, marketplace, and profile, with sanitized counters and errors only.
 
 The dashboard exposes a compact manual Sync panel. Its button is disabled whenever no safe mode is allowed and states plainly that sync only reads Amazon Ads data; it never changes campaigns, bids, budgets, keywords, or targeting. All Amazon Ads entity operations remain read-only.
+
+## Step 19A.10 — Ads Sync Observability + Run History
+
+Manual sync runs now flow through the scoped sync repository into deterministic health classification and authenticated visibility APIs. Health states include `healthy`, `idle`, `running`, `degraded`, `failing`, `blocked`, `stale`, and `never_synced`. The observability service reports only safe run metadata, row counts, error codes, time-window totals, success rate, cooldown, blocked reason, and stale-run state.
+
+`GET /api/ads/sync/observability` and `GET /api/ads/sync/history?limit=20` are authenticated read-only routes. The Seller Action Center shows Sync Health plus recent runs, safe errors, and counts. Retry remains the existing CSRF-protected manual `POST /api/ads/sync` route; no bypass, forced unlock, scheduler, AWS change, or Ads write capability is introduced.

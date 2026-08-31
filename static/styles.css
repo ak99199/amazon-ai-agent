@@ -9,3 +9,5 @@ body{font-family:Arial,sans-serif;background:#f4f6fa;color:#172033;margin:0}main
 .execution-plans .alert-row{gap:.75rem}.dry-run{background:#2f6f45;color:white}
 
 .ads-sync-button:disabled{opacity:.55;cursor:not-allowed}
+
+.sync-health .alert-row{gap:.75rem}
