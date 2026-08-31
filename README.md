@@ -110,3 +110,13 @@ The dashboard uses a single-admin session login. Configure `DASHBOARD_ADMIN_USER
 Protected paths are `/dashboard`, `/api/listings/*`, `/api/portfolio/*`, and `/api/internal/*`. `/health`, `/login`, and login static assets remain public. Sessions are HttpOnly, SameSite=Lax, bounded to eight hours, and use CSRF tokens for login, logout, and the internal snapshot POST route. Security headers and no-store cache policy apply to authenticated content.
 
 `ENABLE_INTERNAL_SNAPSHOT_ROUTE` defaults to `false`. Enable it only for deliberate, authenticated manual operations; the scheduled Lambda remains the normal production collector. This MVP has one shared administrator and should be replaced by managed identity, user accounts, audit trails, and rate limiting before broader production use.
+
+## Step 17B — Lambda Web Dashboard
+
+The web dashboard uses a separate Lambda Function URL function, distinct from the existing `amazon-sp-api-agent` snapshot Lambda. Browser → Function URL → FastAPI/Mangum → DynamoDB. Handler: `web_lambda_handler.handler`.
+
+Build the web artifact only with `./deploy/build_web_lambda.ps1`; it creates `dist/amazon-ai-agent-web-lambda.zip` and does not upload, deploy, or change infrastructure. The build includes the application, templates, static files, `main.py`, `web_lambda_handler.py`, and runtime dependencies while excluding `.env`, tests, local SQLite data, caches, Git metadata, and existing distribution files.
+
+For production set `STORAGE_BACKEND=dynamodb`, `DYNAMODB_SNAPSHOTS_TABLE`, `DYNAMODB_RUNS_TABLE`, `DASHBOARD_ADMIN_USERNAME`, `DASHBOARD_ADMIN_PASSWORD_HASH`, `SESSION_SECRET_KEY`, `SESSION_COOKIE_SECURE=true`, and `ENABLE_INTERNAL_SNAPSHOT_ROUTE=false`. Function URL HTTPS supports Secure session cookies and redirects.
+
+The web Lambda needs DynamoDB read permissions for dashboard reads: `dynamodb:GetItem`, `dynamodb:Query`, and `dynamodb:Scan` scoped to the snapshot table. It does not run scheduled collection; preserve the existing snapshot Lambda and EventBridge role separately. Add IAM permissions manually after review.
