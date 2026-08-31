@@ -146,3 +146,11 @@ The existing scheduled snapshot Lambda now evaluates alerts only after a success
 Set `ALERTS_ENABLED=true` on the snapshot Lambda to activate evaluation. Set `DYNAMODB_ALERTS_TABLE` to a separately provisioned table using `seller_marketplace` as its partition key and `created_at_alert_id` as its sort key. `ALERT_NOTIFICATION_PROVIDER` is optional; without it, alerts are stored but no notification is sent. Configure `log` for safe logging, or `sns` with `ALERT_SNS_TOPIC_ARN` for optional SNS delivery. The web Lambda only reads alerts and never evaluates or sends them.
 
 Alert evaluation and notification failures are isolated: they log only the exception type and leave a successful snapshot collection successful. The snapshot Lambda requires alerts-table `dynamodb:GetItem`, `dynamodb:PutItem`, `dynamodb:Query`, and `dynamodb:Scan` as applicable to the repository; SNS requires `sns:Publish` only when enabled. The web Lambda needs only read permissions (`dynamodb:GetItem`, `dynamodb:Query`, `dynamodb:Scan`) for the alerts table. IAM resources and policies are not created or changed automatically.
+
+## Step 19A.1 — Amazon Ads API Client Foundation
+
+Amazon Ads API approval is pending. This project now contains an isolated, read-only client foundation in `app/amazon_ads`; it does not reuse SP-API credentials or alter the existing SP-API, snapshot Lambda, or dashboard flows.
+
+Configure only when Ads access is approved: `AMAZON_ADS_CLIENT_ID`, `AMAZON_ADS_CLIENT_SECRET`, `AMAZON_ADS_REFRESH_TOKEN`, `AMAZON_ADS_PROFILE_ID`, and optional `AMAZON_ADS_REGION` (`NA`, `EU`, or `FE`; defaults to `FE`). Far East resolves to `https://advertising-api-fe.amazon.com`, supporting India profile discovery.
+
+The intended authorization path is: LwA Ads client → advertiser authorization → refresh token → short-lived access token → profile discovery → explicitly selected India profile → read campaigns/reporting. Tokens are kept in memory only. The client exposes GET and an explicitly read/report-oriented POST helper; it has no PUT, PATCH, DELETE, bid, budget, keyword, or campaign mutation APIs. Profile discovery calls `/v2/profiles` without a profile-scope header; scoped read/report calls include the configured profile header. No live Ads API call is made by this foundation.
