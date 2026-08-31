@@ -1,6 +1,7 @@
 """Authenticated Ads visibility and internal human-review endpoints; no Ads execution."""
 import os
 from fastapi import APIRouter, HTTPException, Query
+from datetime import date
 from pydantic import BaseModel, Field
 from app.config import ConfigurationError, require_dashboard_context
 from app.database.ads_repository import AdsPerformanceRepository
@@ -13,6 +14,9 @@ from app.amazon_ads.client import AmazonAdsClient
 from app.amazon_ads.profiles import AdsProfilesService
 from app.amazon_ads.read_adapters import SponsoredProductsReadAdapter
 from app.services.ads_live_read_service import AdsLiveReadService, AdsLiveReadBlockedError
+from app.amazon_ads.live_read import AdsLiveReadConfig
+from app.services.ads_sync_gate_service import AdsSyncGateService
+from app.services.ads_manual_sync_service import AdsManualSyncService
 from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
 from app.services.ads_recommendation_service import AdsRecommendationService
@@ -185,3 +189,44 @@ def live_read_profiles():
         return {"status":live_read_status(),"profiles":[]}
     except Exception:
         raise HTTPException(503,"Live Ads read is unavailable") from None
+
+class SyncRequest(BaseModel):
+    window_days: int = Field(default=7, ge=1, le=90)
+    start_date: date | None = None
+    end_date: date | None = None
+
+
+def _sync_service(repository):
+    settings=AdsSettings.from_environment()
+    gate=AdsSyncGateService(settings,repository,AdsLiveReadConfig.from_environment())
+    return AdsManualSyncService(gate,repository)
+
+
+@router.get("/sync/status")
+def sync_status():
+    try:
+        context=_context(); repository,_,_=_services()
+        return _sync_service(repository).status(context.seller_id,context.marketplace_id)
+    except Exception:
+        raise HTTPException(503,"Ads sync is unavailable") from None
+
+
+@router.get("/sync-runs")
+def sync_runs(limit:int=Query(20,ge=1,le=100)):
+    try:
+        context=_context(); repository,_,_= _services(); profile_id=AdsSettings.from_environment().profile_id
+        return {"runs":[item.public_dict() for item in repository.list_sync_runs(context.seller_id,context.marketplace_id,profile_id,limit)]}
+    except Exception:
+        raise HTTPException(503,"Ads sync is unavailable") from None
+
+
+@router.post("/sync")
+def sync(payload: SyncRequest):
+    try:
+        context=_context(); repository,_,_= _services()
+        result=_sync_service(repository).run(context.seller_id,context.marketplace_id,start_date=payload.start_date,end_date=payload.end_date,window_days=payload.window_days)
+        return result.public_dict()
+    except ValueError:
+        raise HTTPException(422,"Invalid Ads sync date range") from None
+    except Exception:
+        raise HTTPException(503,"Ads sync is unavailable") from None

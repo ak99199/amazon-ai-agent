@@ -24,3 +24,11 @@ document.querySelectorAll(".dry-run").forEach(button => {
     if (response.ok) window.location.reload();
   });
 });
+
+document.querySelectorAll(".ads-sync-button").forEach(button => {
+  button.addEventListener("click", async () => {
+    const panel=button.closest(".ads-sync");
+    const response=await fetch("/api/ads/sync",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":panel.dataset.csrf},body:JSON.stringify({window_days:7})});
+    if(response.ok) window.location.reload();
+  });
+});

@@ -220,3 +220,13 @@ The live-read boundary prepares the approved future flow: LwA credentials → Ad
 `GET /api/ads/live-read/status` and `GET /api/ads/live-read/profiles` are authenticated, read-only visibility routes. The profile route returns a safe blocked state without requesting Amazon until live-read prerequisites are ready. Modes include `disabled`, `mock`, `blocked_approval`, `blocked_config`, `blocked_profile`, and `ready_live`; sanitized auth/rate-limit/remote failures remain distinct from tokens and raw error payloads.
 
 Sponsored Products adapters isolate endpoint versions and bounded pagination for campaigns, ad groups, keywords, and targets. The report transport isolates read/report creation, bounded polling, and normalized row download with injectable transport/sleeper. All tests use fakes; Amazon Ads approval remains pending. No Ads entity mutation, automatic scheduler, AWS change, or live-write/execution endpoint is implemented.
+
+## Step 19A.9 — Live Ads Ingestion Activation Gate + Manual Sync
+
+Manual Ads synchronization is now guarded by deterministic server-side readiness checks: feature mode, approval, configuration, explicit profile selection, bounded dates, active-run protection, and cooldown. The flow is: readiness → sync gate → manual sync request → injected mock/live read services → existing Ads ingestion/storage → scoped sync diagnostics. There is no scheduler, EventBridge rule, background loop, Lambda trigger, or automatic polling added by this step.
+
+`AMAZON_ADS_USE_MOCK_DATA=true` permits local/mock sync by default. Live mode requires `AMAZON_ADS_USE_MOCK_DATA=false`, `AMAZON_ADS_LIVE_READ_ENABLED=true`, approved access, complete Ads configuration, and an explicit profile. A failed gate returns before any runner or Amazon request can occur. `AMAZON_ADS_MANUAL_SYNC_COOLDOWN_SECONDS` defaults to `60`; active `starting`/`running` records younger than 30 minutes block overlapping requests.
+
+`POST /api/ads/sync` is authenticated and CSRF protected and accepts only a bounded server-side date range or `window_days` (1–90). It never accepts credentials or profile secrets from the request. `GET /api/ads/sync/status` and `GET /api/ads/sync-runs` provide safe gate/run diagnostics. Sync runs are persisted in `ads_sync_runs`, scoped by seller, marketplace, and profile, with sanitized counters and errors only.
+
+The dashboard exposes a compact manual Sync panel. Its button is disabled whenever no safe mode is allowed and states plainly that sync only reads Amazon Ads data; it never changes campaigns, bids, budgets, keywords, or targeting. All Amazon Ads entity operations remain read-only.

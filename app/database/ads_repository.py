@@ -6,6 +6,7 @@ import uuid
 
 from app.amazon_ads.action_models import AdsRecommendationDecision
 from app.amazon_ads.execution_models import AdsExecutionPlan
+from app.amazon_ads.sync_models import AdsManualSyncResult
 import json
 from app.amazon_ads.report_models import AdsPerformanceDaily
 from app.database.connection import DATABASE_PATH, get_connection
@@ -26,7 +27,9 @@ CREATE TABLE IF NOT EXISTS ads_recommendation_decision_events (event_id TEXT PRI
 CREATE INDEX IF NOT EXISTS idx_ads_decision_events_scope ON ads_recommendation_decision_events(seller_id,marketplace_id,profile_id,created_at DESC);CREATE TABLE IF NOT EXISTS ads_execution_plans (execution_plan_id TEXT PRIMARY KEY,recommendation_id TEXT NOT NULL,decision_id TEXT,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_id TEXT NOT NULL,recommendation_code TEXT NOT NULL,action_type TEXT NOT NULL,direction TEXT NOT NULL,dry_run INTEGER NOT NULL CHECK (dry_run=1),eligible INTEGER NOT NULL,status TEXT NOT NULL,eligibility_code TEXT NOT NULL,eligibility_reason TEXT NOT NULL,safety_checks TEXT NOT NULL,plan_hash TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(seller_id,marketplace_id,profile_id,plan_hash));
 CREATE INDEX IF NOT EXISTS idx_ads_execution_plans_scope_created ON ads_execution_plans(seller_id,marketplace_id,profile_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS ads_execution_events (event_id TEXT PRIMARY KEY,execution_plan_id TEXT NOT NULL,recommendation_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_ads_execution_events_scope ON ads_execution_events(seller_id,marketplace_id,profile_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ads_execution_events_scope ON ads_execution_events(seller_id,marketplace_id,profile_id,created_at DESC);CREATE TABLE IF NOT EXISTS ads_sync_runs (sync_id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT,mode TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,started_at TEXT NOT NULL,finished_at TEXT,status TEXT NOT NULL,success INTEGER NOT NULL,campaigns_fetched INTEGER NOT NULL,ad_groups_fetched INTEGER NOT NULL,keywords_fetched INTEGER NOT NULL,targets_fetched INTEGER NOT NULL,report_rows_received INTEGER NOT NULL,rows_normalized INTEGER NOT NULL,rows_saved INTEGER NOT NULL,rows_failed INTEGER NOT NULL,error_code TEXT,error_summary TEXT,created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ads_sync_runs_scope_started ON ads_sync_runs(seller_id,marketplace_id,profile_id,started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ads_sync_runs_status_started ON ads_sync_runs(status,started_at DESC);
 """
 
 
@@ -155,6 +158,23 @@ class AdsPerformanceRepository:
     def list_execution_events(self,seller_id,marketplace_id,profile_id,execution_plan_id):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_execution_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND execution_plan_id=? ORDER BY created_at",(seller_id,marketplace_id,str(profile_id),execution_plan_id)).fetchall()
+    def save_sync_run(self,run):
+        self.initialize();values=(run.sync_id,run.seller_id,run.marketplace_id,run.profile_id,run.mode,run.start_date.isoformat(),run.end_date.isoformat(),run.started_at.isoformat(),run.finished_at.isoformat() if run.finished_at else None,run.status,int(run.success),run.campaigns_fetched,run.ad_groups_fetched,run.keywords_fetched,run.targets_fetched,run.report_rows_received,run.rows_normalized,run.rows_saved,run.rows_failed,run.error_code,run.safe_error_message,run.started_at.isoformat())
+        with get_connection(self._database_path) as connection:connection.execute("INSERT INTO ads_sync_runs(sync_id,seller_id,marketplace_id,profile_id,mode,start_date,end_date,started_at,finished_at,status,success,campaigns_fetched,ad_groups_fetched,keywords_fetched,targets_fetched,report_rows_received,rows_normalized,rows_saved,rows_failed,error_code,error_summary,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET finished_at=excluded.finished_at,status=excluded.status,success=excluded.success,campaigns_fetched=excluded.campaigns_fetched,ad_groups_fetched=excluded.ad_groups_fetched,keywords_fetched=excluded.keywords_fetched,targets_fetched=excluded.targets_fetched,report_rows_received=excluded.report_rows_received,rows_normalized=excluded.rows_normalized,rows_saved=excluded.rows_saved,rows_failed=excluded.rows_failed,error_code=excluded.error_code,error_summary=excluded.error_summary",values)
+        return run
+    def latest_sync_run(self,seller_id,marketplace_id,profile_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? ORDER BY started_at DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None)).fetchone()
+    def list_sync_runs(self,seller_id,marketplace_id,profile_id,limit=20):
+        self.initialize()
+        with get_connection(self._database_path) as connection:rows=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? ORDER BY started_at DESC LIMIT ?",(seller_id,marketplace_id,str(profile_id) if profile_id else None,max(1,min(limit,100)))).fetchall()
+        return [self._sync_run(row) for row in rows]
+    def has_active_sync(self,seller_id,marketplace_id,profile_id,not_before):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT 1 FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND status IN ('starting','running') AND started_at>=? LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None,not_before.isoformat())).fetchone() is not None
+    @staticmethod
+    def _sync_run(item):
+        return AdsManualSyncResult(item["sync_id"],item["mode"],item["seller_id"],item["marketplace_id"],item["profile_id"],date.fromisoformat(item["start_date"]),date.fromisoformat(item["end_date"]),datetime.fromisoformat(item["started_at"]),datetime.fromisoformat(item["finished_at"]) if item["finished_at"] else None,bool(item["success"]),item["status"],item["campaigns_fetched"],item["ad_groups_fetched"],item["keywords_fetched"],item["targets_fetched"],item["report_rows_received"],item["rows_normalized"],item["rows_saved"],item["rows_failed"],item["error_code"],item["error_summary"])
     @staticmethod
     def _execution_plan(item):
         checks=tuple(json.loads(item["safety_checks"]))
