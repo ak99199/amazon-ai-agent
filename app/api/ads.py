@@ -1,14 +1,21 @@
-"""Authenticated, read-only Ads readiness, diagnostics, and recommendations endpoints."""
+"""Authenticated Ads visibility and internal human-review endpoints; no Ads execution."""
 import os
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 from app.config import ConfigurationError, require_dashboard_context
 from app.database.ads_repository import AdsPerformanceRepository
+from app.services.ads_action_service import AdsActionService, UnknownAdsRecommendationError
 from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
 from app.services.ads_recommendation_service import AdsRecommendationService
 from app.services.ads_signal_service import AdsRecommendationConfigurationError
 
 router = APIRouter(prefix="/api/ads", tags=["ads"])
+
+
+class DecisionRequest(BaseModel):
+    status: str
+    review_note: str | None = Field(default=None, max_length=1000)
 
 
 def _services():
@@ -21,11 +28,14 @@ def _context():
     return require_dashboard_context()
 
 
+def _action_service(repository):
+    return AdsActionService(AdsRecommendationService(repository), repository)
+
+
 @router.get("/readiness")
 def readiness():
     try:
-        context = _context()
-        _, _, service = _services()
+        context = _context(); _, _, service = _services()
         return service.get(context.seller_id, context.marketplace_id).public_dict()
     except (ConfigurationError, Exception):
         raise HTTPException(503, "Ads status is unavailable") from None
@@ -34,8 +44,7 @@ def readiness():
 @router.get("/diagnostics")
 def diagnostics():
     try:
-        context = _context()
-        _, service, _ = _services()
+        context = _context(); _, service, _ = _services()
         return service.get(context.seller_id, context.marketplace_id, os.getenv("AMAZON_ADS_PROFILE_ID"))
     except (ConfigurationError, Exception):
         raise HTTPException(503, "Ads diagnostics are unavailable") from None
@@ -44,12 +53,10 @@ def diagnostics():
 @router.get("/ingestion-runs")
 def ingestion_runs(limit: int = Query(20, ge=1, le=100)):
     try:
-        context = _context()
-        profile_id = os.getenv("AMAZON_ADS_PROFILE_ID")
+        context = _context(); profile_id = os.getenv("AMAZON_ADS_PROFILE_ID")
         if not profile_id:
             return {"runs": []}
-        repository, _, _ = _services()
-        rows = repository.list_ingestion_runs(context.seller_id, context.marketplace_id, profile_id, limit)
+        repository, _, _ = _services(); rows = repository.list_ingestion_runs(context.seller_id, context.marketplace_id, profile_id, limit)
         fields = ("run_id", "profile_id", "started_at", "finished_at", "success", "campaigns_fetched", "keywords_fetched", "targets_fetched", "report_rows_received", "rows_normalized", "rows_saved", "rows_failed")
         return {"runs": [{field: row[field] for field in fields} for row in rows]}
     except (ConfigurationError, Exception):
@@ -57,34 +64,55 @@ def ingestion_runs(limit: int = Query(20, ge=1, le=100)):
 
 
 @router.get("/recommendations")
-def recommendations(
-    window: int = Query(30),
-    scope_type: str | None = Query(None),
-    campaign_id: str | None = Query(None),
-    keyword_id: str | None = Query(None),
-    search_term: str | None = Query(None),
-    priority: str | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-):
+def recommendations(window: int = Query(30), scope_type: str | None = Query(None), campaign_id: str | None = Query(None), keyword_id: str | None = Query(None), search_term: str | None = Query(None), priority: str | None = Query(None), limit: int = Query(50, ge=1, le=200)):
     if window not in AdsRecommendationService.allowed_windows:
         raise HTTPException(422, "Unsupported Ads recommendation window")
-    if scope_type not in (None, "campaign", "keyword", "search_term"):
-        raise HTTPException(422, "Unsupported Ads recommendation scope")
-    if priority not in (None, "low", "medium", "high", "critical"):
-        raise HTTPException(422, "Unsupported Ads recommendation priority")
+    if scope_type not in (None, "campaign", "keyword", "search_term") or priority not in (None, "low", "medium", "high", "critical"):
+        raise HTTPException(422, "Unsupported Ads recommendation filter")
     try:
-        context = _context()
-        profile_id = os.getenv("AMAZON_ADS_PROFILE_ID")
+        context = _context(); profile_id = os.getenv("AMAZON_ADS_PROFILE_ID")
         if not profile_id:
             return {"recommendations": [], "count": 0, "window": window}
         repository, _, _ = _services()
-        records = AdsRecommendationService(repository).get_recommendations(
-            context.seller_id, context.marketplace_id, profile_id, window, scope_type,
-            campaign_id, keyword_id, search_term, priority,
-        )
+        records = AdsRecommendationService(repository).get_recommendations(context.seller_id, context.marketplace_id, profile_id, window, scope_type, campaign_id, keyword_id, search_term, priority)
         public = [record.public_dict() for record in records[:limit]]
         return {"recommendations": public, "count": len(public), "window": window}
     except AdsRecommendationConfigurationError:
         raise HTTPException(503, "Ads recommendations are unavailable") from None
     except (ConfigurationError, Exception):
         raise HTTPException(503, "Ads recommendations are unavailable") from None
+
+
+@router.get("/actions")
+def actions(window: int = Query(30), status: str | None = Query(None), priority: str | None = Query(None), limit: int = Query(50, ge=1, le=200)):
+    if window not in AdsRecommendationService.allowed_windows or status not in (None, "pending", "approved", "rejected", "dismissed") or priority not in (None, "low", "medium", "high", "critical"):
+        raise HTTPException(422, "Unsupported Ads action filter")
+    try:
+        context = _context(); profile_id = os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:
+            return {"actions": [], "count": 0, "pending_count": 0, "approved_count": 0, "rejected_count": 0, "dismissed_count": 0, "window": window}
+        repository, _, _ = _services()
+        return _action_service(repository).list_actions(context.seller_id, context.marketplace_id, profile_id, window, status, priority, limit)
+    except (ConfigurationError, AdsRecommendationConfigurationError, ValueError):
+        raise HTTPException(503, "Ads Action Center is unavailable") from None
+    except Exception:
+        raise HTTPException(503, "Ads Action Center is unavailable") from None
+
+
+@router.post("/actions/{recommendation_id}/decision")
+def decide(recommendation_id: str, payload: DecisionRequest):
+    try:
+        context = _context(); profile_id = os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:
+            raise HTTPException(404, "Ads recommendation is not available")
+        repository, _, _ = _services()
+        decision = _action_service(repository).set_decision(context.seller_id, context.marketplace_id, profile_id, recommendation_id, payload.status, payload.review_note)
+        return decision.public_dict()
+    except UnknownAdsRecommendationError:
+        raise HTTPException(404, "Ads recommendation is not available") from None
+    except ValueError:
+        raise HTTPException(422, "Invalid Ads review decision") from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, "Ads Action Center is unavailable") from None

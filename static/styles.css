@@ -3,3 +3,5 @@ body{font-family:Arial,sans-serif;background:#f4f6fa;color:#172033;margin:0}main
 .panel p{line-height:1.5}
 
 .ads-recommendations .action-card{margin-block:.75rem}.ads-recommendations .muted{color:#5f6b7a}
+
+.ads-action-center input{max-width:20rem}.ads-decision{display:flex;gap:.5rem;flex-wrap:wrap;align-items:end}.ads-decision label{display:grid;gap:.25rem}
