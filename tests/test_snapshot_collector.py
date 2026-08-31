@@ -25,3 +25,14 @@ def test_page_failure_is_safe(tmp_path):
         def get_listings(self,*args): raise RuntimeError("access-token")
     result=SnapshotCollector(Failed(),ListingSnapshotRepository(tmp_path/"db.sqlite")).collect("seller","market")
     assert not result.success and result.pages_processed == 0 and "access-token" not in str(result.errors)
+
+def test_amazon_client_error_logging_is_sanitized(tmp_path,caplog):
+    from app.amazon.client import AmazonClientError
+    class Failed:
+        def get_listings(self,*args): raise AmazonClientError(403,"Amazon access is not permitted")
+    result=SnapshotCollector(Failed(),ListingSnapshotRepository(tmp_path/"db.sqlite")).collect("seller","market")
+    assert not result.success
+    assert "status_code=403" in caplog.text
+    assert "Amazon access is not permitted" in caplog.text
+    for secret in ("access-token","refresh-token","client-secret","Authorization"):
+        assert secret not in caplog.text
