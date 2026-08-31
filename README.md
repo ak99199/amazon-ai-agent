@@ -102,3 +102,11 @@ The response contains aggregate portfolio counts/averages and normalized per-ASI
 The lightweight seller dashboard uses FastAPI templates, Jinja2, vanilla JavaScript, and CSS. Visit `/dashboard` for seller-wide portfolio metrics, filters, ranking, and listing links. Visit `/dashboard/listings/{asin}` for the current normalized listing, history summary, intelligence, recommendations, and explanation.
 
 The UI depends on the existing read-only portfolio and listing-insights services. Start it locally with `python -m uvicorn main:app --reload`. It handles unconfigured, empty, missing-title, missing-price, and insufficient-history states safely. It is an MVP dashboard: it provides historical operational context only and never modifies Amazon.
+
+## Step 17A — Dashboard Security
+
+The dashboard uses a single-admin session login. Configure `DASHBOARD_ADMIN_USERNAME`, `DASHBOARD_ADMIN_PASSWORD_HASH` (bcrypt hash only), and `SESSION_SECRET_KEY`; set `SESSION_COOKIE_SECURE=true` for HTTPS production deployments. If any required authentication setting is missing, protected routes fail closed and do not bypass authentication.
+
+Protected paths are `/dashboard`, `/api/listings/*`, `/api/portfolio/*`, and `/api/internal/*`. `/health`, `/login`, and login static assets remain public. Sessions are HttpOnly, SameSite=Lax, bounded to eight hours, and use CSRF tokens for login, logout, and the internal snapshot POST route. Security headers and no-store cache policy apply to authenticated content.
+
+`ENABLE_INTERNAL_SNAPSHOT_ROUTE` defaults to `false`. Enable it only for deliberate, authenticated manual operations; the scheduled Lambda remains the normal production collector. This MVP has one shared administrator and should be replaced by managed identity, user accounts, audit trails, and rate limiting before broader production use.
