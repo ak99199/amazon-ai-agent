@@ -120,3 +120,11 @@ Build the web artifact only with `./deploy/build_web_lambda.ps1`; it creates `di
 For production set `STORAGE_BACKEND=dynamodb`, `DYNAMODB_SNAPSHOTS_TABLE`, `DYNAMODB_RUNS_TABLE`, `DASHBOARD_ADMIN_USERNAME`, `DASHBOARD_ADMIN_PASSWORD_HASH`, `SESSION_SECRET_KEY`, `SESSION_COOKIE_SECURE=true`, and `ENABLE_INTERNAL_SNAPSHOT_ROUTE=false`. Function URL HTTPS supports Secure session cookies and redirects.
 
 The web Lambda needs DynamoDB read permissions for dashboard reads: `dynamodb:GetItem`, `dynamodb:Query`, and `dynamodb:Scan` scoped to the snapshot table. It does not run scheduled collection; preserve the existing snapshot Lambda and EventBridge role separately. Add IAM permissions manually after review.
+
+## Step 18A — Seller Action Center
+
+The protected `/dashboard` page is now a read-only daily Action Center. It prioritizes the existing deterministic listing recommendations in critical, high, medium, then low priority order, with risk score as a deterministic tie-breaker. Each item links to its listing detail page and retains the underlying action code while presenting a seller-friendly label.
+
+The dashboard includes portfolio KPIs, including a deterministic **Needs attention** count for critical and high-priority recommendations. Its filters retain the portfolio priority, status, confidence, sort, and changed-recently controls, and add risk level and needs-attention filtering. The listing table has responsive layout, readable badges, truncated product titles, safe missing-value states, and direct ASIN links.
+
+Listing detail pages now group normalized current listing data, historical intelligence, deterministic recommended actions, an optional clearly-labelled AI explanation, and recent snapshot history. The AI explanation is contextual only: it is not a prediction and never changes an action or makes an Amazon update. All dashboard data remains authenticated, seller-scoped, read-only, and excludes secrets, hashes, raw Amazon payloads, and buyer information. Human review remains required before any Seller Central action.

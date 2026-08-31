@@ -22,3 +22,15 @@ class Settings:
     def require_complete(self):
         if self.missing_fields: raise ConfigurationError("Amazon listing connection is not configured")
         return self
+
+@dataclass(frozen=True)
+class DashboardContext:
+    seller_id: str
+    marketplace_id: str
+
+def require_dashboard_context(settings: Settings | None = None) -> DashboardContext:
+    """Require only the seller scope needed to read stored dashboard data."""
+    settings = settings or Settings.from_environment()
+    if not settings.seller_id or not settings.marketplace_id:
+        raise ConfigurationError("Seller dashboard context is not configured")
+    return DashboardContext(settings.seller_id, settings.marketplace_id)
