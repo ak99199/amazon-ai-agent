@@ -68,3 +68,11 @@ Scores are deterministic, bounded 0–100, and are not predictions. Stability st
 
 Risk flags describe historical operational conditions only; opportunity flags do not indicate sales, demand, profit, or a recommended Amazon change. This is historical listing intelligence, not sales prediction.
 
+
+## Step 12 — Recommendation Layer
+
+Recommendations follow a deterministic chain: repository → Listing Intelligence → Recommendation Service → normalized API response. `GET /api/listings/{asin}/recommendations?window=30` supports the same history windows as intelligence.
+
+Actions include `KEEP_STABLE`, `WAIT_FOR_MORE_DATA`, `REVIEW_TITLE`, `CHECK_LISTING_STATUS`, `REVIEW_PRICE_VOLATILITY`, `REVIEW_FULFILLMENT`, `INVESTIGATE_RECENT_CHANGE`, and `MONITOR_LISTING`. Risk flags map directly to seller-friendly recommendations with low, medium, high, or critical priority. Insufficient history remains low priority; unstable status and multiple high-risk signals raise priority.
+
+Recommendations are deterministic historical guidance only. They do not modify Amazon, predict sales or profit, or replace seller review. A human must review any recommendation before making a change in Seller Central.
