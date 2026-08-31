@@ -26,3 +26,12 @@ def get_listing_history(asin:str,limit:int=Query(30,ge=1,le=100)):
     history=service.get_history(settings.seller_id or "",settings.marketplace_id or "",asin,limit)
     trend=service.get_trend(settings.seller_id or "",settings.marketplace_id or "",asin,limit)
     return {"history":[snapshot.public_dict() for snapshot in history],"trend":trend.public_dict()}
+
+@router.get("/listings/{asin}/intelligence")
+def get_listing_intelligence(asin:str,window:str=Query("30",pattern="^(7|30|60|90|all)$")):
+    from app.services.listing_intelligence_service import ListingIntelligenceService
+    settings=Settings.from_environment()
+    try: settings.require_complete()
+    except ConfigurationError: raise HTTPException(503,"Amazon listing connection is not configured") from None
+    intelligence=ListingIntelligenceService(ListingSnapshotRepository()).analyze(settings.seller_id or "",settings.marketplace_id or "",asin,window)
+    return intelligence.public_dict()

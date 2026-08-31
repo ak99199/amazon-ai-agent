@@ -59,3 +59,12 @@ Build a deployment ZIP only; this never uploads or creates AWS resources:
 ```powershell
 .\deploy\build_lambda.ps1
 ```
+
+## Step 11 — Listing Intelligence Engine
+
+The Listing Intelligence Engine analyzes only seller-scoped historical snapshots through the repository contract, so it works with both local SQLite and DynamoDB storage. `GET /api/listings/{asin}/intelligence?window=30` supports `7`, `30`, `60`, `90`, and `all` windows and returns normalized historical signals only.
+
+Scores are deterministic, bounded 0–100, and are not predictions. Stability starts at 100 and subtracts weighted change frequency, status/title/fulfillment changes, then adds up to 15 duration points. Risk adds points for non-active status, repeated status/title/fulfillment changes, price movement of at least 20%, recent changes, and insufficient history. Opportunity rewards stability, consistently active status, sufficient history, and low operational risk. Confidence is high at 10 snapshots and 30 days; medium at 4 snapshots and 7 days or at least 2 snapshots across 30 days; otherwise it is low.
+
+Risk flags describe historical operational conditions only; opportunity flags do not indicate sales, demand, profit, or a recommended Amazon change. This is historical listing intelligence, not sales prediction.
+
