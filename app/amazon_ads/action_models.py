@@ -23,6 +23,7 @@ class AdsRecommendationDecision:
     created_at: datetime | None = None
     updated_at: datetime | None = None
     reviewed_at: datetime | None = None
+    recommendation_snapshot: dict | None = None
 
     def __post_init__(self):
         if self.status not in VALID_DECISION_STATUSES:

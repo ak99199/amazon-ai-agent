@@ -44,7 +44,8 @@ class AdsActionService:
             raise UnknownAdsRecommendationError("Ads recommendation is not available")
         note = self._note(review_note)
         timestamp = self.now()
-        decision = AdsRecommendationDecision(recommendation.recommendation_id, seller_id, marketplace_id, str(profile_id), recommendation.scope_type, recommendation.scope_id, recommendation.recommendation_code, recommendation.title, status, note, review_source, created_at=timestamp, updated_at=timestamp, reviewed_at=timestamp)
+        snapshot = {"recommendation_code": recommendation.recommendation_code, "priority": recommendation.priority, "confidence": recommendation.confidence, "window_days": recommendation.window_days, "scope_type": recommendation.scope_type, "scope_id": recommendation.scope_id, "metrics_snapshot": recommendation.public_dict()["metrics_snapshot"], "suggested_action": recommendation.suggested_action, "suggested_bid_direction": recommendation.suggested_bid_direction}
+        decision = AdsRecommendationDecision(recommendation.recommendation_id, seller_id, marketplace_id, str(profile_id), recommendation.scope_type, recommendation.scope_id, recommendation.recommendation_code, recommendation.title, status, note, review_source, created_at=timestamp, updated_at=timestamp, reviewed_at=timestamp, recommendation_snapshot=snapshot)
         return self.repository.save_decision(decision)
 
     @staticmethod

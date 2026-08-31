@@ -244,3 +244,11 @@ The authenticated `GET /api/ads/intelligence?window=30&limit=10` endpoint combin
 The response aggregates base metrics first and then derives CTR, CPC, CVR, ACOS, and ROAS with Decimal-safe calculations. It includes chronological observed-day trend points (days without data are omitted consistently), a previous-period comparison with safe unavailable values for zero denominators, deterministic campaign/keyword/search-term rankings, recommendation counts, and review-outcome counts.
 
 The Seller Dashboard adds an Amazon Ads Intelligence panel with KPI cards, a window selector, observed-day trend table, ranked performance summaries, and the explicit notice that approved recommendations are only approved for possible future execution. This phase is analytics only: it makes no Amazon Ads writes, has no scheduler, and never auto-executes an approved recommendation.
+
+## Step 19A.12 — Recommendation Effectiveness Tracking
+
+Decision effectiveness uses the existing, seller/marketplace/profile-scoped human decision records. The authenticated `GET /api/ads/effectiveness?window=30` endpoint reports current-state approval, rejection, dismissal, and pending analytics. `GET /api/ads/effectiveness/feedback` provides reviewed-only, structured internal feedback records without raw review-note text.
+
+New decisions capture one immutable, safe deterministic recommendation snapshot at review time. Older decisions correctly report unavailable snapshot context rather than reconstructing historical metrics from current data. The dashboard labels recurring approval/rejection patterns as human-review patterns only.
+
+Feedback analytics do not automatically change recommendation rules or Amazon Ads settings. There is no autonomous learning, threshold tuning, scheduler, Amazon Ads write, or execution in this phase.
