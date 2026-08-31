@@ -96,3 +96,9 @@ The response is suitable for a seller dashboard and remains strictly read-only. 
 `GET /api/portfolio/insights` provides a seller-wide, read-only dashboard summary by reusing the existing per-listing insights service. It supports `window`, `sort` (`risk_desc`, `opportunity_desc`, `recent_change`, `stability_desc`), `priority`, `status`, `confidence`, `changed_recently`, `min_risk_score`, and a bounded `limit` up to 200.
 
 The response contains aggregate portfolio counts/averages and normalized per-ASIN summaries only. No listing hash, credentials, tokens, raw Amazon data, or buyer information is exposed. Portfolio metrics are historical operational context, not a sales or profit prediction.
+
+## Step 16 — Seller Dashboard UI
+
+The lightweight seller dashboard uses FastAPI templates, Jinja2, vanilla JavaScript, and CSS. Visit `/dashboard` for seller-wide portfolio metrics, filters, ranking, and listing links. Visit `/dashboard/listings/{asin}` for the current normalized listing, history summary, intelligence, recommendations, and explanation.
+
+The UI depends on the existing read-only portfolio and listing-insights services. Start it locally with `python -m uvicorn main:app --reload`. It handles unconfigured, empty, missing-title, missing-price, and insufficient-history states safely. It is an MVP dashboard: it provides historical operational context only and never modifies Amazon.

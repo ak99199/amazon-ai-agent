@@ -6,3 +6,4 @@ httpx
 pytest
 boto3
 openai
+jinja2
