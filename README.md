@@ -198,3 +198,15 @@ SQLite adds `ads_recommendation_decisions`, scoped by seller, marketplace, profi
 Authenticated routes are `GET /api/ads/actions?window=30&status=pending&priority=high&limit=50` and `POST /api/ads/actions/{recommendation_id}/decision`. The POST requires the existing session and CSRF header and accepts only `approved`, `rejected`, or `dismissed`, plus an optional trimmed plain-text review note capped at 1,000 characters. It updates only internal review state and returns no credentials, tokens, headers, raw payloads, or Amazon execution data.
 
 The Seller Dashboard shows action counts, current recommendation details, review-note input, and Approve/Reject/Dismiss controls. It explicitly states that no Amazon Ads changes are executed. The panel fails independently without affecting listing Action Center, alert, or Ads readiness panels. Amazon Ads approval remains pending and this project still has no Ads mutation or live network path in this workflow.
+
+## Step 19A.7 — Controlled Ads Execution Safety Layer (Dry-Run Only)
+
+The controlled execution safety layer stops at a persisted simulation. Its flow is: historical Ads data → deterministic recommendation → human review → approved internal decision → safety validation → dry-run execution plan → **STOP**. Step 19A.7 has no Amazon Ads mutation, executor, write client, or execute/apply/push endpoint.
+
+`AdsExecutionPlanService` resolves both the current recommendation and its stored server-side decision. It requires `approved`, validates seller/marketplace/profile scope, rejects stale or unsupported recommendations, applies dry-run/configuration checks, and records a deterministic plan hash. The plan never invents a bid or budget amount: `current_value` and `proposed_value` remain null while direction-only plans such as `BID_DIRECTION_REVIEW` are used.
+
+SQLite adds `ads_execution_plans` and `ads_execution_events`. One scope-bound `plan_hash` gives repeated dry-run requests idempotent behavior, while only a changed plan state appends a new audit event. Every plan stores `dry_run=true`; this cannot be changed by request input.
+
+Safety configuration is centralized: `AMAZON_ADS_EXECUTION_ENABLED=false`, `AMAZON_ADS_DRY_RUN_ONLY=true`, max bid/budget increase/decrease percentages (all default `20`), `AMAZON_ADS_MAX_SINGLE_ACTION_AMOUNT=0`, and `AMAZON_ADS_MAX_ACTIONS_PER_RUN=1`. Invalid values fail safely. Even if an environment accidentally enables execution, Step 19A.7 never sends a live write; a false dry-run-only setting blocks planning.
+
+Authenticated endpoints are `GET /api/ads/execution-plans` and `POST /api/ads/actions/{recommendation_id}/dry-run`. The POST requires the existing CSRF protection and creates internal plan metadata only. The dashboard labels this as “Simulation only — no Amazon Ads changes are sent.” Live Ads API writes are a future-only capability and are not implemented.

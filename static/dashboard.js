@@ -14,3 +14,13 @@ document.querySelectorAll(".ads-decision").forEach(form => {
     if (response.ok) window.location.reload();
   });
 });
+
+document.querySelectorAll(".dry-run").forEach(button => {
+  button.addEventListener("click", async () => {
+    const panel = button.closest(".ads-action-center");
+    const response = await fetch(`/api/ads/actions/${encodeURIComponent(button.dataset.recommendationId)}/dry-run`, {
+      method: "POST", headers: {"X-CSRF-Token": panel.dataset.csrf}
+    });
+    if (response.ok) window.location.reload();
+  });
+});

@@ -5,6 +5,8 @@ from pathlib import Path
 import uuid
 
 from app.amazon_ads.action_models import AdsRecommendationDecision
+from app.amazon_ads.execution_models import AdsExecutionPlan
+import json
 from app.amazon_ads.report_models import AdsPerformanceDaily
 from app.database.connection import DATABASE_PATH, get_connection
 
@@ -21,7 +23,10 @@ CREATE INDEX IF NOT EXISTS idx_ads_decisions_scope_status ON ads_recommendation_
 CREATE INDEX IF NOT EXISTS idx_ads_decisions_recommendation ON ads_recommendation_decisions(recommendation_id);
 CREATE INDEX IF NOT EXISTS idx_ads_decisions_updated ON ads_recommendation_decisions(updated_at DESC);
 CREATE TABLE IF NOT EXISTS ads_recommendation_decision_events (event_id TEXT PRIMARY KEY,decision_id TEXT NOT NULL,recommendation_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,old_status TEXT,new_status TEXT NOT NULL,review_note TEXT,review_source TEXT NOT NULL,created_at TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS idx_ads_decision_events_scope ON ads_recommendation_decision_events(seller_id,marketplace_id,profile_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ads_decision_events_scope ON ads_recommendation_decision_events(seller_id,marketplace_id,profile_id,created_at DESC);CREATE TABLE IF NOT EXISTS ads_execution_plans (execution_plan_id TEXT PRIMARY KEY,recommendation_id TEXT NOT NULL,decision_id TEXT,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_id TEXT NOT NULL,recommendation_code TEXT NOT NULL,action_type TEXT NOT NULL,direction TEXT NOT NULL,dry_run INTEGER NOT NULL CHECK (dry_run=1),eligible INTEGER NOT NULL,status TEXT NOT NULL,eligibility_code TEXT NOT NULL,eligibility_reason TEXT NOT NULL,safety_checks TEXT NOT NULL,plan_hash TEXT NOT NULL,created_at TEXT NOT NULL,UNIQUE(seller_id,marketplace_id,profile_id,plan_hash));
+CREATE INDEX IF NOT EXISTS idx_ads_execution_plans_scope_created ON ads_execution_plans(seller_id,marketplace_id,profile_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS ads_execution_events (event_id TEXT PRIMARY KEY,execution_plan_id TEXT NOT NULL,recommendation_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ads_execution_events_scope ON ads_execution_events(seller_id,marketplace_id,profile_id,created_at DESC);
 """
 
 
@@ -131,6 +136,29 @@ class AdsPerformanceRepository:
         with get_connection(self._database_path) as connection:
             return connection.execute("SELECT * FROM ads_recommendation_decision_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND recommendation_id=? ORDER BY created_at", (seller_id,marketplace_id,str(profile_id),recommendation_id)).fetchall()
 
+    def get_execution_plan(self,seller_id,marketplace_id,profile_id,plan_hash):
+        self.initialize()
+        with get_connection(self._database_path) as connection:row=connection.execute("SELECT * FROM ads_execution_plans WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND plan_hash=?",(seller_id,marketplace_id,str(profile_id),plan_hash)).fetchone()
+        return self._execution_plan(row) if row else None
+    def list_execution_plans(self,seller_id,marketplace_id,profile_id,limit=50):
+        self.initialize()
+        with get_connection(self._database_path) as connection:rows=connection.execute("SELECT * FROM ads_execution_plans WHERE seller_id=? AND marketplace_id=? AND profile_id=? ORDER BY created_at DESC LIMIT ?",(seller_id,marketplace_id,str(profile_id),max(1,min(limit,200)))).fetchall()
+        return [self._execution_plan(row) for row in rows]
+    def save_execution_plan(self,plan):
+        self.initialize();existing=self.get_execution_plan(plan.seller_id,plan.marketplace_id,plan.profile_id,plan.plan_hash)
+        if existing and existing.status==plan.status and existing.eligible==plan.eligible and existing.safety_checks==plan.safety_checks:return existing
+        values=(plan.stable_execution_plan_id,plan.recommendation_id,plan.decision_id,plan.seller_id,plan.marketplace_id,plan.profile_id,plan.scope_type,plan.scope_id,plan.recommendation_code,plan.action_type,plan.direction,1,int(plan.eligible),plan.status,plan.eligibility_code,plan.eligibility_reason,json.dumps(list(plan.safety_checks),sort_keys=True,separators=(",",":")),plan.plan_hash,plan.created_at.isoformat())
+        with get_connection(self._database_path) as connection:
+            connection.execute("INSERT INTO ads_execution_plans(execution_plan_id,recommendation_id,decision_id,seller_id,marketplace_id,profile_id,scope_type,scope_id,recommendation_code,action_type,direction,dry_run,eligible,status,eligibility_code,eligibility_reason,safety_checks,plan_hash,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(seller_id,marketplace_id,profile_id,plan_hash) DO UPDATE SET decision_id=excluded.decision_id,eligible=excluded.eligible,status=excluded.status,eligibility_code=excluded.eligibility_code,eligibility_reason=excluded.eligibility_reason,safety_checks=excluded.safety_checks,created_at=excluded.created_at",values)
+            connection.execute("INSERT INTO ads_execution_events(event_id,execution_plan_id,recommendation_id,seller_id,marketplace_id,profile_id,event_type,message,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(str(uuid.uuid4()),plan.stable_execution_plan_id,plan.recommendation_id,plan.seller_id,plan.marketplace_id,plan.profile_id,"PLAN_ELIGIBLE" if plan.eligible else "PLAN_REJECTED",plan.eligibility_reason,plan.created_at.isoformat()))
+        return plan
+    def list_execution_events(self,seller_id,marketplace_id,profile_id,execution_plan_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_execution_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND execution_plan_id=? ORDER BY created_at",(seller_id,marketplace_id,str(profile_id),execution_plan_id)).fetchall()
+    @staticmethod
+    def _execution_plan(item):
+        checks=tuple(json.loads(item["safety_checks"]))
+        return AdsExecutionPlan(item["recommendation_id"],item["decision_id"],item["seller_id"],item["marketplace_id"],item["profile_id"],item["scope_type"],item["scope_id"],item["recommendation_code"],item["action_type"],item["direction"],None,None,True,bool(item["eligible"]),item["status"],item["eligibility_code"],item["eligibility_reason"],checks,datetime.fromisoformat(item["created_at"]),item["execution_plan_id"])
     @staticmethod
     def _decision(item):
         return AdsRecommendationDecision(item["recommendation_id"],item["seller_id"],item["marketplace_id"],item["profile_id"],item["scope_type"],item["scope_id"],item["recommendation_code"],item["recommendation_title"],item["status"],item["review_note"],item["review_source"],item["decision_id"],datetime.fromisoformat(item["created_at"]),datetime.fromisoformat(item["updated_at"]),datetime.fromisoformat(item["reviewed_at"]) if item["reviewed_at"] else None)

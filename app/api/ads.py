@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 from app.config import ConfigurationError, require_dashboard_context
 from app.database.ads_repository import AdsPerformanceRepository
 from app.services.ads_action_service import AdsActionService, UnknownAdsRecommendationError
+from app.services.ads_execution_plan_service import AdsExecutionPlanService, UnknownAdsExecutionRecommendationError
+from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
 from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
 from app.services.ads_recommendation_service import AdsRecommendationService
@@ -116,3 +118,34 @@ def decide(recommendation_id: str, payload: DecisionRequest):
         raise
     except Exception:
         raise HTTPException(503, "Ads Action Center is unavailable") from None
+
+@router.get("/execution-plans")
+def execution_plans(limit: int = Query(50, ge=1, le=200)):
+    try:
+        context = _context(); profile_id = os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id: return {"plans": [], "count": 0}
+        repository, _, _ = _services()
+        plans = AdsExecutionPlanService(AdsRecommendationService(repository), repository).list_plans(context.seller_id, context.marketplace_id, profile_id, limit)
+        return {"plans": plans, "count": len(plans)}
+    except Exception:
+        raise HTTPException(503, "Execution planning is unavailable") from None
+
+
+@router.post("/actions/{recommendation_id}/dry-run")
+def dry_run(recommendation_id: str, window: int = Query(30)):
+    if window not in AdsRecommendationService.allowed_windows:
+        raise HTTPException(422, "Unsupported Ads recommendation window")
+    try:
+        context = _context(); profile_id = os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id: raise HTTPException(404, "Ads recommendation is not available")
+        repository, _, _ = _services()
+        plan = AdsExecutionPlanService(AdsRecommendationService(repository), repository).create_dry_run(context.seller_id, context.marketplace_id, profile_id, recommendation_id, window)
+        return plan.public_dict()
+    except UnknownAdsExecutionRecommendationError:
+        raise HTTPException(404, "Ads recommendation is not available") from None
+    except AdsExecutionSafetyConfigurationError:
+        raise HTTPException(503, "Execution planning is unavailable") from None
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(503, "Execution planning is unavailable") from None
