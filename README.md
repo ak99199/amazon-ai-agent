@@ -210,3 +210,13 @@ SQLite adds `ads_execution_plans` and `ads_execution_events`. One scope-bound `p
 Safety configuration is centralized: `AMAZON_ADS_EXECUTION_ENABLED=false`, `AMAZON_ADS_DRY_RUN_ONLY=true`, max bid/budget increase/decrease percentages (all default `20`), `AMAZON_ADS_MAX_SINGLE_ACTION_AMOUNT=0`, and `AMAZON_ADS_MAX_ACTIONS_PER_RUN=1`. Invalid values fail safely. Even if an environment accidentally enables execution, Step 19A.7 never sends a live write; a false dry-run-only setting blocks planning.
 
 Authenticated endpoints are `GET /api/ads/execution-plans` and `POST /api/ads/actions/{recommendation_id}/dry-run`. The POST requires the existing CSRF protection and creates internal plan metadata only. The dashboard labels this as “Simulation only — no Amazon Ads changes are sent.” Live Ads API writes are a future-only capability and are not implemented.
+
+## Step 19A.8 — Amazon Ads Live Read Wiring Foundation
+
+The live-read boundary prepares the approved future flow: LwA credentials → Ads authentication → profile discovery → explicitly selected profile → read-only campaign/ad group/keyword/target reads → bounded report request/poll/download → existing normalization and historical storage. It reuses the existing LwA and read-only client abstractions; access tokens remain runtime-only and are never persisted or returned.
+
+`AMAZON_ADS_LIVE_READ_ENABLED=false` and `AMAZON_ADS_USE_MOCK_DATA=true` are the safe defaults. When live reads are disabled or mock mode is active, no live Amazon request is made. If enabled, the service still blocks before any request for pending approval, incomplete credentials, or missing explicit `AMAZON_ADS_PROFILE_ID`; it never auto-selects a discovered profile.
+
+`GET /api/ads/live-read/status` and `GET /api/ads/live-read/profiles` are authenticated, read-only visibility routes. The profile route returns a safe blocked state without requesting Amazon until live-read prerequisites are ready. Modes include `disabled`, `mock`, `blocked_approval`, `blocked_config`, `blocked_profile`, and `ready_live`; sanitized auth/rate-limit/remote failures remain distinct from tokens and raw error payloads.
+
+Sponsored Products adapters isolate endpoint versions and bounded pagination for campaigns, ad groups, keywords, and targets. The report transport isolates read/report creation, bounded polling, and normalized row download with injectable transport/sleeper. All tests use fakes; Amazon Ads approval remains pending. No Ads entity mutation, automatic scheduler, AWS change, or live-write/execution endpoint is implemented.

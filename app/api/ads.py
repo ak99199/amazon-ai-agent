@@ -7,6 +7,12 @@ from app.database.ads_repository import AdsPerformanceRepository
 from app.services.ads_action_service import AdsActionService, UnknownAdsRecommendationError
 from app.services.ads_execution_plan_service import AdsExecutionPlanService, UnknownAdsExecutionRecommendationError
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
+from app.amazon_ads.config import AdsSettings
+from app.amazon_ads.auth import AdsLwaAuthenticator
+from app.amazon_ads.client import AmazonAdsClient
+from app.amazon_ads.profiles import AdsProfilesService
+from app.amazon_ads.read_adapters import SponsoredProductsReadAdapter
+from app.services.ads_live_read_service import AdsLiveReadService, AdsLiveReadBlockedError
 from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
 from app.services.ads_recommendation_service import AdsRecommendationService
@@ -149,3 +155,33 @@ def dry_run(recommendation_id: str, window: int = Query(30)):
         raise
     except Exception:
         raise HTTPException(503, "Execution planning is unavailable") from None
+
+
+def _live_read_service():
+    settings=AdsSettings.from_environment()
+    service=AdsLiveReadService(settings)
+    if not service.status().ready:
+        return service
+    client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings))
+    return AdsLiveReadService(settings,AdsProfilesService(client),SponsoredProductsReadAdapter(client))
+
+
+@router.get("/live-read/status")
+def live_read_status():
+    try:
+        return _live_read_service().status().public_dict()
+    except Exception:
+        return {"mode":"configuration_error","live_read_enabled":False,"mock_data_enabled":True,"approval_status":"unknown","config_complete":False,"profile_selected":False,"ready":False,"last_error_code":"configuration_error"}
+
+
+@router.get("/live-read/profiles")
+def live_read_profiles():
+    try:
+        service=_live_read_service(); status=service.status()
+        if not status.ready:
+            return {"status":status.public_dict(),"profiles":[]}
+        return {"status":status.public_dict(),"profiles":[profile.public_dict() for profile in service.discover_profiles()]}
+    except AdsLiveReadBlockedError:
+        return {"status":live_read_status(),"profiles":[]}
+    except Exception:
+        raise HTTPException(503,"Live Ads read is unavailable") from None
