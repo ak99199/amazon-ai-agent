@@ -60,16 +60,21 @@ class AdsPerformanceRepository:
             if "source_proposal_id" not in event_columns:
                 connection.execute("ALTER TABLE ads_rule_activation_events ADD COLUMN source_proposal_id TEXT")
     def save(self, row):
-        self.initialize()
+        self.save_many([row]);return row
+    @staticmethod
+    def _performance_values(row):
         columns = ("seller_id","marketplace_id","profile_id","date","ad_product","campaign_id","campaign_name","ad_group_id","ad_group_name","keyword_id","keyword_text","match_type","target_id","target_expression","search_term","currency","impressions","clicks","spend","orders_count","units","sales","dimension_key")
         values = (row.seller_id,row.marketplace_id,row.profile_id,row.date.isoformat(),row.ad_product,row.campaign_id,row.campaign_name,row.ad_group_id,row.ad_group_name,row.keyword_id,row.keyword_text,row.match_type,row.target_id,row.target_expression,row.search_term,row.currency,row.impressions,row.clicks,str(row.spend),row.orders,row.units,str(row.sales),row.dimension_key)
+        return columns,values
+    def save_many(self, rows):
+        rows=list(rows)
+        if not rows:return []
+        self.initialize();columns,first=self._performance_values(rows[0])
         updates = ",".join(f"{name}=excluded.{name}" for name in columns if name not in ("seller_id","marketplace_id","profile_id","date","ad_product","dimension_key"))
         with get_connection(self._database_path) as connection:
-            connection.execute(f"INSERT INTO ads_performance_daily ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) ON CONFLICT(seller_id,marketplace_id,profile_id,date,ad_product,dimension_key) DO UPDATE SET {updates}", values)
-        return row
-
-    def save_many(self, rows):
-        return [self.save(row) for row in rows]
+            statement=f"INSERT INTO ads_performance_daily ({','.join(columns)}) VALUES ({','.join('?' for _ in columns)}) ON CONFLICT(seller_id,marketplace_id,profile_id,date,ad_product,dimension_key) DO UPDATE SET {updates}"
+            connection.executemany(statement,[first,*[self._performance_values(row)[1] for row in rows[1:]]])
+        return rows
 
     def save_ingestion_run(self, result, seller_id, marketplace_id, profile_id):
         self.initialize()

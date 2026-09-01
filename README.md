@@ -304,3 +304,9 @@ The bounded manual flow extends the same lifecycle: Readiness → Confirmation �
 Campaign DAILY rows require the requested date, campaign ID, and numeric metric columns. Metrics must be finite and non-negative, count metrics must be integral, dates must fall within the requested two-day window, and duplicate report grain is evaluated as date plus campaign ID. Malformed rows are isolated, and reports beyond 100 rows are safely marked truncated.
 
 This validation performs no persistence, sync-run creation, scheduling, recommendation side effects, advertiser mutations, AWS changes, or deployment. Signed locations, raw bytes, parsed rows, and credentials are never returned.
+
+## Step 19A.15C.3.1 — Controlled Historical Report Persistence
+
+The internal flow is: Readiness → Explicit Confirmation → One Historical Report → Download and Fully Validate → Existing Ads Historical Repository → Transactional Idempotent Upsert. Only `success` or `valid_empty` campaign DAILY results may reach the repository; partial or failed reports perform zero performance-row writes.
+
+Rows use authoritative server-side seller, marketplace, and profile scope. The existing logical grain remains seller + marketplace + profile + date + Sponsored Products + campaign dimension, so replay is idempotent and corrected metrics update the existing row. Persistence is local only: there is no public endpoint yet, sync-run creation, scheduler, automatic recommendation processing, advertiser mutation, AWS change, or deployment.

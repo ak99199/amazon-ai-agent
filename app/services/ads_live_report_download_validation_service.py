@@ -9,9 +9,12 @@ class AdsLiveReportDownloadValidationService:
  def __init__(self,lifecycle_service,reporting_service,row_limit=100,compressed_limit=1048576,decompressed_limit=5242880):
   self.lifecycle=lifecycle_service;self.reporting=reporting_service;self.row_limit=max(1,min(int(row_limit),100));self.compressed_limit=max(1,int(compressed_limit));self.decompressed_limit=max(1,int(decompressed_limit))
  def run(self,confirm_live_read=False):
-  result=self.lifecycle.run_with_completed(confirm_live_read,self._completed)
+  return self.run_with_validated(confirm_live_read)
+ def run_with_validated(self,confirm_live_read=False,seller_id="validation",marketplace_id="validation",on_validated=None):
+  completed=lambda *args:self._completed(*args,seller_id,marketplace_id,on_validated)
+  result=self.lifecycle.run_with_completed(confirm_live_read,completed)
   return result if isinstance(result,AdsLiveReportDownloadValidationResult) else self._from_lifecycle(result)
- def _completed(self,transport,profile_id,report_id,report_status,started,ready,start,end,polls):
+ def _completed(self,transport,profile_id,report_id,report_status,started,ready,start,end,polls,seller_id,marketplace_id,on_validated):
   try:rows,compressed_size,_=transport.download_gzip_json(report_status.location,self.compressed_limit,self.decompressed_limit)
   except AdsApiClientError as error:return self._result(self._api_status(error),started,ready,start,end,polls,True,False,False,False,0,0,0,0,False,"Historical report download failed.")
   except AdsReportDownloadError:return self._result("download_error",started,ready,start,end,polls,True,False,False,False,0,0,0,0,False,"Historical report download failed.")
@@ -19,15 +22,16 @@ class AdsLiveReportDownloadValidationService:
   except AdsReportParseError:return self._result("parse_error",started,ready,start,end,polls,True,True,True,False,0,0,0,0,False,"Historical report parsing failed.")
   except TimeoutError:return self._result("remote_error",started,ready,start,end,polls,True,False,False,False,0,0,0,0,False,"Historical report download failed.")
   except Exception:return self._result("download_error",started,ready,start,end,polls,True,False,False,False,0,0,0,0,False,"Historical report download failed.")
-  observed=len(rows);bounded=rows[:self.row_limit];valid=invalid=0;seen=set()
+  observed=len(rows);bounded=rows[:self.row_limit];valid=invalid=0;seen=set();normalized=[]
   for row in bounded:
    try:
     grain=self._validate_row(row,start,end)
     if grain in seen:raise ValueError("duplicate report grain")
-    seen.add(grain);self.reporting.normalize_row("validation","validation",profile_id,row);valid+=1
+    seen.add(grain);normalized.append(self.reporting.normalize_row(seller_id,marketplace_id,profile_id,row));valid+=1
    except Exception:invalid+=1
   status="valid_empty" if observed==0 else "partial_valid" if invalid else "success"
-  return self._result(status,started,ready,start,end,polls,True,True,True,True,observed,len(bounded),valid,invalid,observed>self.row_limit,"Historical report rows were validated without persistence.")
+  result=self._result(status,started,ready,start,end,polls,True,True,True,True,observed,len(bounded),valid,invalid,observed>self.row_limit,"Historical report rows were validated without persistence.")
+  return on_validated(tuple(normalized),result) if on_validated and status in ("success","valid_empty") else result
  @staticmethod
  def _validate_row(row,start,end):
   if not isinstance(row,dict) or not row.get("campaignId") or "date" not in row:raise ValueError("invalid campaign row")
