@@ -26,12 +26,19 @@ from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
 from app.services.ads_recommendation_service import AdsRecommendationService
 from app.services.ads_signal_service import AdsRecommendationConfigurationError
+from app.amazon_ads.rule_activation_models import AdsRuleActivationRequest,AdsRuleRollbackRequest
+from app.services.ads_rule_activation_service import AdsRuleActivationService
+from app.services.ads_rule_rollback_service import AdsRuleRollbackService
+from app.services.ads_rule_version_view_service import AdsRuleVersionViewService
 
 router = APIRouter(prefix="/api/ads", tags=["ads"])
 
 
 class RuleTuningDecisionRequest(BaseModel):
     status: str
+class RuleVersionChangeRequest(BaseModel):
+    confirm: bool = False
+    expected_active_rule_version_id: str | None = None
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -49,6 +56,67 @@ def _context():
 
 def _action_service(repository):
     return AdsActionService(AdsRecommendationService(repository), repository)
+
+def _rule_scope():
+    context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+    if not profile_id:raise HTTPException(503,"Ads rule-version controls are unavailable")
+    return context.seller_id,context.marketplace_id,profile_id
+
+def _activation_response(result):
+    body={**result.__dict__,"checks":[check.__dict__ for check in result.checks]}
+    if result.status in ("activated","already_active"):return body
+    if result.status=="conflict":raise HTTPException(409,"Active rule version changed")
+    if result.status=="error":raise HTTPException(503,"Rule-version activation is unavailable")
+    failed={check.code for check in result.checks if not check.passed}
+    if "VERSION_EXISTS" in failed:raise HTTPException(404,"Rule version is not available")
+    if "EXPLICIT_CONFIRMATION" in failed:raise HTTPException(400,"Explicit confirmation is required")
+    raise HTTPException(422,"Rule version did not pass activation safety checks")
+
+def _rollback_response(result):
+    body={**result.__dict__,"checks":[check.__dict__ for check in result.checks]}
+    if result.status=="rolled_back":return body
+    if result.status=="conflict":raise HTTPException(409,"Active rule version changed")
+    if result.status=="no_history":raise HTTPException(422,"No valid rollback history is available")
+    if result.status=="error":raise HTTPException(503,"Rule-version rollback is unavailable")
+    if any(check.code=="EXPLICIT_CONFIRMATION" and not check.passed for check in result.checks):raise HTTPException(400,"Explicit confirmation is required")
+    raise HTTPException(422,"Rule version did not pass rollback safety checks")
+
+@router.get("/rule-versions/active")
+def active_rule_version():
+    try:
+        seller,marketplace,profile=_rule_scope();repository,_,_=_services();return AdsRuleVersionViewService(repository).active(seller,marketplace,profile)
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Ads rule-version controls are unavailable") from None
+
+@router.get("/rule-versions")
+def rule_versions(limit:int=Query(100,ge=1,le=200)):
+    try:
+        seller,marketplace,profile=_rule_scope();repository,_,_=_services();return AdsRuleVersionViewService(repository).history(seller,marketplace,profile,limit)
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Ads rule-version controls are unavailable") from None
+
+@router.get("/rule-versions/{rule_version_id}/diff")
+def rule_version_diff(rule_version_id:str):
+    try:
+        seller,marketplace,profile=_rule_scope();repository,_,_=_services();result=AdsRuleVersionViewService(repository).diff(seller,marketplace,profile,rule_version_id)
+        if result is None:raise HTTPException(404,"Rule version is not available")
+        return result
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Ads rule-version controls are unavailable") from None
+
+@router.post("/rule-versions/{rule_version_id}/activate")
+def activate_rule_version(rule_version_id:str,payload:RuleVersionChangeRequest):
+    try:
+        seller,marketplace,profile=_rule_scope();repository,_,_=_services();result=AdsRuleActivationService(repository).activate(AdsRuleActivationRequest(seller,marketplace,profile,rule_version_id,payload.expected_active_rule_version_id,payload.confirm));return _activation_response(result)
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Rule-version activation is unavailable") from None
+
+@router.post("/rule-versions/rollback")
+def rollback_rule_version(payload:RuleVersionChangeRequest):
+    try:
+        seller,marketplace,profile=_rule_scope();repository,_,_=_services();result=AdsRuleRollbackService(repository).rollback(AdsRuleRollbackRequest(seller,marketplace,profile,payload.expected_active_rule_version_id,payload.confirm));return _rollback_response(result)
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Rule-version rollback is unavailable") from None
 
 
 @router.get("/readiness")

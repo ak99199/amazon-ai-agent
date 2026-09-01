@@ -258,3 +258,11 @@ Feedback analytics do not automatically change recommendation rules or Amazon Ad
 Rule-tuning proposals are generated only from reviewed, safe historical feedback snapshots. The bounded offline evaluator uses the existing active/default thresholds as an immutable baseline and never wires proposed values into the recommendation engine. `GET /api/ads/rule-tuning` generates review-only candidates for 30/60/90-day windows; `GET /api/ads/rule-tuning/proposals` lists persisted proposals.
 
 No automatic threshold changes, active-rule switch, Amazon Ads write, execution, or scheduler is implemented.
+
+## Step 19A.14 — Rule Version Activation Safety + Rollback
+
+The controlled internal flow is: Offline Rule Proposal → Human Proposal Approval → Proposed Rule Version → Activation Safety Checks → Explicit Human Activation → Active Recommendation Thresholds. Approval for a future rule version does not activate it; activation is a separate authenticated, CSRF-protected action with explicit confirmation and optimistic concurrency.
+
+Rollback follows: Active Version → Explicit Human Rollback → Previous Valid Version from activation history → Recommendation Engine Uses Restored Thresholds. Activation and rollback are atomic, audited, seller/marketplace/profile scoped, and never rewrite threshold snapshots or historical decisions. The resolver is read-only: an active persisted version supplies deterministic recommendation thresholds, while no persisted active version preserves the existing environment/default configuration.
+
+No Amazon Ads entity write occurs in Step 19A.14. Rule activation and rollback change internal recommendation thresholds only; they do not modify campaigns, bids, budgets, keywords, or targeting.

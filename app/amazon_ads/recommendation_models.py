@@ -26,6 +26,9 @@ class AdsRecommendation:
     suggested_bid_direction: str | None = None
     suggested_budget_direction: str | None = None
     created_at: datetime | None = None
+    rule_version_id: str | None = None
+    rule_version_name: str | None = None
+    rule_version_source: str | None = None
 
     @property
     def recommendation_id(self) -> str:
@@ -51,6 +54,9 @@ class AdsRecommendation:
             "window_days": self.window_days,
             "metrics_snapshot": metrics,
             "suggested_action": self.suggested_action,
+            "rule_version_id": self.rule_version_id,
+            "rule_version_name": self.rule_version_name,
+            "rule_version_source": self.rule_version_source,
             "suggested_bid_direction": self.suggested_bid_direction,
             "suggested_budget_direction": self.suggested_budget_direction,
             "created_at": (self.created_at or datetime.now(timezone.utc)).isoformat(),

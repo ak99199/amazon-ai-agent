@@ -8,6 +8,9 @@ from tests.test_dashboard import configure_admin, login
 
 
 class Repository:
+    def get_active_rule_version(self, *args, **kwargs):
+        return None
+
     def list_window(self, *args, **kwargs):
         return [AdsPerformanceDaily("seller", "market", "profile", date(2026, 1, 1), "SP", "campaign", "Campaign", keyword_id="keyword", keyword_text="Keyword", impressions=1000, clicks=30, spend=Decimal("100"), orders=2, units=2, sales=Decimal("500"))]
 

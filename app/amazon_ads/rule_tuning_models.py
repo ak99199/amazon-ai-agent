@@ -6,6 +6,24 @@ import hashlib, json
 
 ALLOWED_TUNING_PARAMETERS=("target_acos_percent","min_impressions_for_ctr","low_ctr_percent","min_clicks_for_cvr","low_cvr_percent","high_cpc_amount","wasted_spend_threshold")
 PROPOSAL_STATUSES=("proposed","approved_for_future_rule_version","rejected","dismissed")
+MAX_RELATIVE_TUNING_CHANGE=Decimal("25")
+TUNING_PARAMETER_BOUNDS={"target_acos_percent":(Decimal("5"),Decimal("100")),"min_impressions_for_ctr":(Decimal("1"),None),"low_ctr_percent":(Decimal("0"),Decimal("100")),"min_clicks_for_cvr":(Decimal("1"),None),"low_cvr_percent":(Decimal("0"),Decimal("100")),"high_cpc_amount":(Decimal("0.01"),None),"wasted_spend_threshold":(Decimal("0.01"),None)}
+def relative_change_percent(current,proposed):
+ current=Decimal(str(current));proposed=Decimal(str(proposed))
+ if current==0:return Decimal("0") if proposed==0 else Decimal("Infinity")
+ return abs(proposed-current)/abs(current)*Decimal("100")
+def validate_threshold_snapshot(values):
+ parsed={};well_formed=isinstance(values,dict) and bool(values)
+ if well_formed:
+  try:
+   for name,value in values.items():
+    number=Decimal(str(value))
+    if not number.is_finite() or (name in ("min_impressions_for_ctr","min_clicks_for_cvr") and number!=number.to_integral_value()):raise ValueError
+    parsed[name]=number
+  except (ArithmeticError,ValueError,TypeError):well_formed=False
+ whitelisted=well_formed and set(parsed)==set(ALLOWED_TUNING_PARAMETERS)
+ bounds_valid=whitelisted and all(TUNING_PARAMETER_BOUNDS[name][0]<=value and (TUNING_PARAMETER_BOUNDS[name][1] is None or value<=TUNING_PARAMETER_BOUNDS[name][1]) for name,value in parsed.items())
+ return parsed,well_formed,whitelisted,bounds_valid
 
 @dataclass(frozen=True)
 class AdsRecommendationRuleVersion:

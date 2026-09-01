@@ -1,5 +1,5 @@
 """Seller-scoped SQLite repository for normalized Ads data and human decisions."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 import uuid
@@ -7,6 +7,7 @@ import uuid
 from app.amazon_ads.action_models import AdsRecommendationDecision
 from app.amazon_ads.execution_models import AdsExecutionPlan
 from app.amazon_ads.sync_models import AdsManualSyncResult
+from app.amazon_ads.rule_tuning_models import validate_threshold_snapshot
 import json
 from app.amazon_ads.report_models import AdsPerformanceDaily
 from app.database.connection import DATABASE_PATH, get_connection
@@ -29,7 +30,14 @@ CREATE INDEX IF NOT EXISTS idx_ads_execution_plans_scope_created ON ads_executio
 CREATE TABLE IF NOT EXISTS ads_execution_events (event_id TEXT PRIMARY KEY,execution_plan_id TEXT NOT NULL,recommendation_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_ads_execution_events_scope ON ads_execution_events(seller_id,marketplace_id,profile_id,created_at DESC);CREATE TABLE IF NOT EXISTS ads_sync_runs (sync_id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT,mode TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,started_at TEXT NOT NULL,finished_at TEXT,status TEXT NOT NULL,success INTEGER NOT NULL,campaigns_fetched INTEGER NOT NULL,ad_groups_fetched INTEGER NOT NULL,keywords_fetched INTEGER NOT NULL,targets_fetched INTEGER NOT NULL,report_rows_received INTEGER NOT NULL,rows_normalized INTEGER NOT NULL,rows_saved INTEGER NOT NULL,rows_failed INTEGER NOT NULL,error_code TEXT,error_summary TEXT,created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_ads_sync_runs_scope_started ON ads_sync_runs(seller_id,marketplace_id,profile_id,started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_ads_sync_runs_status_started ON ads_sync_runs(status,started_at DESC);CREATE TABLE IF NOT EXISTS ads_rule_versions (rule_version_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,version_name TEXT NOT NULL,status TEXT NOT NULL,thresholds_json TEXT NOT NULL,source TEXT NOT NULL,created_by TEXT NOT NULL,notes TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(rule_version_id,seller_id,marketplace_id,profile_id));CREATE TABLE IF NOT EXISTS ads_rule_tuning_proposals (proposal_id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,base_rule_version_id TEXT NOT NULL,parameter_name TEXT NOT NULL,current_value TEXT NOT NULL,proposed_value TEXT NOT NULL,direction TEXT NOT NULL,reason_code TEXT NOT NULL,reason_summary TEXT NOT NULL,sample_size INTEGER NOT NULL,confidence TEXT NOT NULL,status TEXT NOT NULL,evaluation_summary_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,reviewed_at TEXT);CREATE TABLE IF NOT EXISTS ads_rule_tuning_events (event_id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ads_sync_runs_status_started ON ads_sync_runs(status,started_at DESC);
+CREATE TABLE IF NOT EXISTS ads_rule_versions (rule_version_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,version_name TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('active','proposed','rejected','archived')),thresholds_json TEXT NOT NULL,source TEXT NOT NULL,source_proposal_id TEXT,created_by TEXT NOT NULL,notes TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,activated_at TEXT,PRIMARY KEY(rule_version_id,seller_id,marketplace_id,profile_id));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ads_rule_one_active ON ads_rule_versions(seller_id,marketplace_id,profile_id) WHERE status='active';
+CREATE INDEX IF NOT EXISTS idx_ads_rule_versions_scope_created ON ads_rule_versions(seller_id,marketplace_id,profile_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS ads_rule_tuning_proposals (proposal_id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,base_rule_version_id TEXT NOT NULL,parameter_name TEXT NOT NULL,current_value TEXT NOT NULL,proposed_value TEXT NOT NULL,direction TEXT NOT NULL,reason_code TEXT NOT NULL,reason_summary TEXT NOT NULL,sample_size INTEGER NOT NULL,confidence TEXT NOT NULL,status TEXT NOT NULL,evaluation_summary_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,reviewed_at TEXT);
+CREATE TABLE IF NOT EXISTS ads_rule_activation_events (event_id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL CHECK(event_type IN ('RULE_VERSION_ACTIVATED','RULE_VERSION_ROLLED_BACK')),from_rule_version_id TEXT,to_rule_version_id TEXT,source_proposal_id TEXT,created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ads_rule_activation_events_scope_created ON ads_rule_activation_events(seller_id,marketplace_id,profile_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS ads_rule_tuning_events (event_id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,created_at TEXT NOT NULL);
 """
 
 
@@ -43,6 +51,14 @@ class AdsPerformanceRepository:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(ads_recommendation_decisions)")}
             if "recommendation_snapshot_json" not in columns:
                 connection.execute("ALTER TABLE ads_recommendation_decisions ADD COLUMN recommendation_snapshot_json TEXT")
+            rule_columns = {row[1] for row in connection.execute("PRAGMA table_info(ads_rule_versions)")}
+            if "source_proposal_id" not in rule_columns:
+                connection.execute("ALTER TABLE ads_rule_versions ADD COLUMN source_proposal_id TEXT")
+            if "activated_at" not in rule_columns:
+                connection.execute("ALTER TABLE ads_rule_versions ADD COLUMN activated_at TEXT")
+            event_columns = {row[1] for row in connection.execute("PRAGMA table_info(ads_rule_activation_events)")}
+            if "source_proposal_id" not in event_columns:
+                connection.execute("ALTER TABLE ads_rule_activation_events ADD COLUMN source_proposal_id TEXT")
     def save(self, row):
         self.initialize()
         columns = ("seller_id","marketplace_id","profile_id","date","ad_product","campaign_id","campaign_name","ad_group_id","ad_group_name","keyword_id","keyword_text","match_type","target_id","target_expression","search_term","currency","impressions","clicks","spend","orders_count","units","sales","dimension_key")
@@ -218,9 +234,126 @@ class AdsPerformanceRepository:
     def list_rule_tuning_proposals(self,seller,marketplace,profile,limit=100):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_rule_tuning_proposals WHERE seller_id=? AND marketplace_id=? AND profile_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?",(seller,marketplace,str(profile),max(1,min(limit,200)))).fetchall()
+    def get_rule_version(self,seller,marketplace,profile,rule_version_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            row=connection.execute("SELECT * FROM ads_rule_versions WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND rule_version_id=?",(seller,marketplace,str(profile),rule_version_id)).fetchone()
+        return self._rule_version(row) if row else None
+    def list_rule_versions(self,seller,marketplace,profile,limit=100):
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            rows=connection.execute("SELECT * FROM ads_rule_versions WHERE seller_id=? AND marketplace_id=? AND profile_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?",(seller,marketplace,str(profile),max(1,min(limit,200)))).fetchall()
+        return [self._rule_version(row) for row in rows]
+    def get_active_rule_version(self,seller,marketplace,profile):
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            row=connection.execute("SELECT * FROM ads_rule_versions WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND status='active'",(seller,marketplace,str(profile))).fetchone()
+        return self._rule_version(row) if row else None
+    def get_rule_tuning_proposal(self,seller,marketplace,profile,proposal_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:row=connection.execute("SELECT * FROM ads_rule_tuning_proposals WHERE proposal_id=? AND seller_id=? AND marketplace_id=? AND profile_id=?",(proposal_id,seller,marketplace,str(profile))).fetchone()
+        return dict(row) if row else None
+    def activate_rule_version(self,seller,marketplace,profile,target_rule_version_id,expected_active_rule_version_id,event_id,activated_at):
+        """Archive, activate, and audit using one SQLite transaction."""
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current=self._get_active_rule_version_in_transaction(connection,seller,marketplace,profile);current_id=current["rule_version_id"] if current else None
+            if current_id!=expected_active_rule_version_id:return None
+            target=self._get_rule_version_in_transaction(connection,seller,marketplace,profile,target_rule_version_id)
+            if not target or target["status"]!="proposed":return None
+            if current:self._archive_rule_version_in_transaction(connection,seller,marketplace,profile,current_id,activated_at)
+            self._activate_rule_version_in_transaction(connection,seller,marketplace,profile,target_rule_version_id,activated_at)
+            self._insert_activation_event_in_transaction(connection,event_id,seller,marketplace,profile,current_id,target_rule_version_id,target["source_proposal_id"],activated_at)
+            return {"previous_rule_version_id":current_id,"target":self._rule_version(self._get_rule_version_in_transaction(connection,seller,marketplace,profile,target_rule_version_id))}
+    @staticmethod
+    def _get_active_rule_version_in_transaction(connection,seller,marketplace,profile):return connection.execute("SELECT * FROM ads_rule_versions WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND status='active'",(seller,marketplace,str(profile))).fetchone()
+    @staticmethod
+    def _get_rule_version_in_transaction(connection,seller,marketplace,profile,rule_version_id):return connection.execute("SELECT * FROM ads_rule_versions WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND rule_version_id=?",(seller,marketplace,str(profile),rule_version_id)).fetchone()
+    @staticmethod
+    def _archive_rule_version_in_transaction(connection,seller,marketplace,profile,rule_version_id,now):connection.execute("UPDATE ads_rule_versions SET status='archived',updated_at=? WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND rule_version_id=? AND status='active'",(now.isoformat(),seller,marketplace,str(profile),rule_version_id))
+    @staticmethod
+    def _activate_rule_version_in_transaction(connection,seller,marketplace,profile,rule_version_id,now):
+        if connection.execute("UPDATE ads_rule_versions SET status='active',updated_at=?,activated_at=? WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND rule_version_id=? AND status='proposed'",(now.isoformat(),now.isoformat(),seller,marketplace,str(profile),rule_version_id)).rowcount!=1:raise RuntimeError("Rule version activation failed")
+    @staticmethod
+    def _insert_activation_event_in_transaction(connection,event_id,seller,marketplace,profile,from_id,to_id,source_proposal_id,now):connection.execute("INSERT INTO ads_rule_activation_events(event_id,seller_id,marketplace_id,profile_id,event_type,from_rule_version_id,to_rule_version_id,source_proposal_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(event_id,seller,marketplace,str(profile),"RULE_VERSION_ACTIVATED",from_id,to_id,source_proposal_id,now.isoformat()))
+    def create_rule_version(self,rule_version_id,seller_id=None,marketplace_id=None,profile_id=None,version_name=None,status=None,thresholds=None,source=None,created_by=None,notes=None,created_at=None,source_proposal_id=None,activated_at=None):
+        if not isinstance(rule_version_id,str):
+            version=rule_version_id
+            rule_version_id=version.rule_version_id; seller_id=version.seller_id; marketplace_id=version.marketplace_id; profile_id=version.profile_id
+            version_name=version.version_name; status=version.status; thresholds=version.thresholds; source=version.source; created_by=version.created_by
+            notes=version.notes; created_at=version.created_at; source_proposal_id=getattr(version,"source_proposal_id",source_proposal_id); activated_at=getattr(version,"activated_at",activated_at)
+        if status not in ("active","proposed","rejected","archived"): raise ValueError("Invalid rule-version status")
+        created_at=created_at or datetime.now(timezone.utc)
+        values=(rule_version_id,seller_id,marketplace_id,str(profile_id),version_name,status,json.dumps(thresholds,sort_keys=True,separators=(",",":")),source,source_proposal_id,created_by,notes,created_at.isoformat(),created_at.isoformat(),activated_at.isoformat() if activated_at else None)
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            connection.execute("INSERT INTO ads_rule_versions(rule_version_id,seller_id,marketplace_id,profile_id,version_name,status,thresholds_json,source,source_proposal_id,created_by,notes,created_at,updated_at,activated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",values)
+        return self.get_rule_version(seller_id,marketplace_id,profile_id,rule_version_id)
+    def update_rule_version_status(self,seller,marketplace,profile,rule_version_id,status,updated_at=None,activated_at=None):
+        if status not in ("active","proposed","rejected","archived"): raise ValueError("Invalid rule-version status")
+        updated_at=updated_at or datetime.now(timezone.utc)
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            cursor=connection.execute("UPDATE ads_rule_versions SET status=?,updated_at=?,activated_at=COALESCE(?,activated_at) WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND rule_version_id=?",(status,updated_at.isoformat(),activated_at.isoformat() if activated_at else None,seller,marketplace,str(profile),rule_version_id))
+        return self.get_rule_version(seller,marketplace,profile,rule_version_id) if cursor.rowcount else None
+    def insert_rule_activation_event(self,event_id,seller_id,marketplace_id,profile_id,event_type,from_rule_version_id,to_rule_version_id,created_at,source_proposal_id=None):
+        if event_type not in ("RULE_VERSION_ACTIVATED","RULE_VERSION_ROLLED_BACK"): raise ValueError("Invalid rule-activation event type")
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            connection.execute("INSERT INTO ads_rule_activation_events(event_id,seller_id,marketplace_id,profile_id,event_type,from_rule_version_id,to_rule_version_id,source_proposal_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(event_id,seller_id,marketplace_id,str(profile_id),event_type,from_rule_version_id,to_rule_version_id,source_proposal_id,created_at.isoformat()))
+        return self.get_latest_rule_activation_event(seller_id,marketplace_id,profile_id)
+    def list_rule_activation_events(self,seller,marketplace,profile,limit=100):
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            return connection.execute("SELECT * FROM ads_rule_activation_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?",(seller,marketplace,str(profile),max(1,min(limit,200)))).fetchall()
+    def get_latest_rule_activation_event(self,seller,marketplace,profile):
+        rows=self.list_rule_activation_events(seller,marketplace,profile,1)
+        return rows[0] if rows else None
+    def get_rollback_candidate(self,seller,marketplace,profile,current_rule_version_id=None):
+        current=self.get_active_rule_version(seller,marketplace,profile)
+        if not current or (current_rule_version_id is not None and current["rule_version_id"]!=current_rule_version_id):return None
+        with get_connection(self._database_path) as connection:
+            row=self._get_rollback_event_in_transaction(connection,seller,marketplace,profile,current["rule_version_id"])
+            if not row or not row["from_rule_version_id"]:return None
+            candidate=self._get_rule_version_in_transaction(connection,seller,marketplace,profile,row["from_rule_version_id"])
+        if not candidate:return {"rule_version_id":row["from_rule_version_id"],"status":"missing","thresholds":None}
+        try:return self._rule_version(candidate)
+        except (json.JSONDecodeError,TypeError):
+            value=dict(candidate);value["thresholds"]=None;return value
+    def rollback_rule_version(self,seller,marketplace,profile,expected_active_rule_version_id,event_id,rolled_back_at):
+        """Restore the activation predecessor and audit it in one transaction."""
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current=self._get_active_rule_version_in_transaction(connection,seller,marketplace,profile);current_id=current["rule_version_id"] if current else None
+            if current_id!=expected_active_rule_version_id:return {"status":"conflict"}
+            if not current:return {"status":"blocked"}
+            history=self._get_rollback_event_in_transaction(connection,seller,marketplace,profile,current_id)
+            if not history or not history["from_rule_version_id"]:return {"status":"no_history"}
+            previous=self._get_rule_version_in_transaction(connection,seller,marketplace,profile,history["from_rule_version_id"])
+            if not previous:return {"status":"blocked","reason":"missing"}
+            snapshot=self._rule_version(previous);_,well,white,bounds=validate_threshold_snapshot(snapshot["thresholds"])
+            if previous["status"]!="archived" or not (well and white and bounds):return {"status":"blocked","reason":"invalid"}
+            self._archive_rule_version_in_transaction(connection,seller,marketplace,profile,current_id,rolled_back_at)
+            self._restore_rule_version_in_transaction(connection,seller,marketplace,profile,previous["rule_version_id"],rolled_back_at)
+            self._insert_rollback_event_in_transaction(connection,event_id,seller,marketplace,profile,current_id,previous["rule_version_id"],previous["source_proposal_id"],rolled_back_at)
+            return {"status":"rolled_back","from_rule_version_id":current_id,"to_rule_version_id":previous["rule_version_id"]}
+    @staticmethod
+    def _get_rollback_event_in_transaction(connection,seller,marketplace,profile,current_id):return connection.execute("SELECT * FROM ads_rule_activation_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND event_type='RULE_VERSION_ACTIVATED' AND to_rule_version_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1",(seller,marketplace,str(profile),current_id)).fetchone()
+    @staticmethod
+    def _restore_rule_version_in_transaction(connection,seller,marketplace,profile,rule_version_id,now):
+        if connection.execute("UPDATE ads_rule_versions SET status='active',updated_at=?,activated_at=? WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND rule_version_id=? AND status='archived'",(now.isoformat(),now.isoformat(),seller,marketplace,str(profile),rule_version_id)).rowcount!=1:raise RuntimeError("Rule version restore failed")
+    @staticmethod
+    def _insert_rollback_event_in_transaction(connection,event_id,seller,marketplace,profile,from_id,to_id,source_proposal_id,now):connection.execute("INSERT INTO ads_rule_activation_events(event_id,seller_id,marketplace_id,profile_id,event_type,from_rule_version_id,to_rule_version_id,source_proposal_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(event_id,seller,marketplace,str(profile),"RULE_VERSION_ROLLED_BACK",from_id,to_id,source_proposal_id,now.isoformat()))
     @staticmethod
     def _sync_run(item):
         return AdsManualSyncResult(item["sync_id"],item["mode"],item["seller_id"],item["marketplace_id"],item["profile_id"],date.fromisoformat(item["start_date"]),date.fromisoformat(item["end_date"]),datetime.fromisoformat(item["started_at"]),datetime.fromisoformat(item["finished_at"]) if item["finished_at"] else None,bool(item["success"]),item["status"],item["campaigns_fetched"],item["ad_groups_fetched"],item["keywords_fetched"],item["targets_fetched"],item["report_rows_received"],item["rows_normalized"],item["rows_saved"],item["rows_failed"],item["error_code"],item["error_summary"])
+    @staticmethod
+    def _rule_version(item):
+        value=dict(item)
+        value["thresholds"]=json.loads(value["thresholds_json"])
+        return value
     @staticmethod
     def _execution_plan(item):
         checks=tuple(json.loads(item["safety_checks"]))

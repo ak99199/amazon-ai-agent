@@ -1,10 +1,10 @@
 """Offline, bounded rule-threshold evaluation only; never activates a rule."""
 from decimal import Decimal
-from app.amazon_ads.rule_tuning_models import ALLOWED_TUNING_PARAMETERS, AdsRuleTuningProposal
+from app.amazon_ads.rule_tuning_models import ALLOWED_TUNING_PARAMETERS, MAX_RELATIVE_TUNING_CHANGE, AdsRuleTuningProposal
 from app.amazon_ads.rule_versions import AdsRuleVersions
 
 class AdsRuleEvaluationService:
- def __init__(self,effectiveness_service,min_sample=20,max_relative_change=Decimal("25")):
+ def __init__(self,effectiveness_service,min_sample=20,max_relative_change=MAX_RELATIVE_TUNING_CHANGE):
   self.effectiveness_service=effectiveness_service;self.min_sample=int(min_sample);self.max_relative_change=Decimal(str(max_relative_change))
  def evaluate(self,seller_id,marketplace_id,profile_id,window=90):
   summary=self.effectiveness_service.get(seller_id,marketplace_id,profile_id,window);baseline=AdsRuleVersions.baseline(seller_id,marketplace_id,profile_id);reviewed=summary.total_reviewed

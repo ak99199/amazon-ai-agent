@@ -5,6 +5,7 @@ from app.amazon_ads.recommendation_models import AdsRecommendation
 from app.database.ads_repository import AdsPerformanceRepository
 from app.services.ads_metrics_service import AdsMetricsService
 from app.services.ads_signal_service import AdsSignalService
+from app.services.ads_rule_version_resolver import AdsRuleVersionResolver
 
 
 _PRIORITY = {
@@ -39,10 +40,11 @@ class AdsRecommendationService:
 
     allowed_windows = (7, 14, 30, 60, 90)
 
-    def __init__(self, repository: AdsPerformanceRepository, metrics: AdsMetricsService | None = None, signals: AdsSignalService | None = None, now=None):
+    def __init__(self, repository: AdsPerformanceRepository, metrics: AdsMetricsService | None = None, signals: AdsSignalService | None = None, now=None, rule_version_resolver: AdsRuleVersionResolver | None = None):
         self.repository = repository
         self.metrics = metrics or AdsMetricsService()
-        self.signals = signals or AdsSignalService()
+        self.signals = signals
+        self.rule_version_resolver = rule_version_resolver if rule_version_resolver is not None else (None if signals is not None else AdsRuleVersionResolver(repository))
         self.now = now or (lambda: datetime.now(timezone.utc))
 
     def get_profile_recommendations(self, seller_id, marketplace_id, profile_id, window=30, **filters):
@@ -62,6 +64,8 @@ class AdsRecommendationService:
             raise ValueError("Unsupported Ads recommendation window")
         if scope_type not in (None, "campaign", "keyword", "search_term"):
             raise ValueError("Unsupported Ads recommendation scope")
+        resolved = self.rule_version_resolver.resolve(seller_id, marketplace_id, profile_id) if self.rule_version_resolver else None
+        signals = AdsSignalService(resolved.thresholds) if resolved else self.signals
         rows = self.repository.list_window(seller_id, marketplace_id, profile_id, window, reference_date, campaign_id=campaign_id, keyword_id=keyword_id, search_term=search_term)
         scopes = (scope_type,) if scope_type else ("campaign", "keyword", "search_term")
         result: list[AdsRecommendation] = []
@@ -69,9 +73,9 @@ class AdsRecommendationService:
             for scope_id, scope_rows in self._groups(rows, current_scope).items():
                 metrics = self.metrics.aggregate(scope_rows)
                 days = len({row.date for row in scope_rows})
-                confidence = self.signals.confidence(metrics, days)
+                confidence = signals.confidence(metrics, days)
                 label = self._label(scope_rows[0], current_scope, scope_id)
-                for code in self.signals.codes(metrics, days, current_scope):
+                for code in signals.codes(metrics, days, current_scope):
                     recommendation = AdsRecommendation(
                         seller_id=seller_id, marketplace_id=marketplace_id, profile_id=str(profile_id),
                         scope_type=current_scope, scope_id=scope_id, scope_label=label,
@@ -81,6 +85,9 @@ class AdsRecommendationService:
                         metrics_snapshot=metrics, suggested_action=_ACTIONS.get(code, "Review the normalized historical metrics with a human; no Amazon change is made."),
                         suggested_bid_direction="decrease" if code == "BID_DECREASE_CANDIDATE" else ("increase" if code == "BID_INCREASE_CANDIDATE" else None),
                         created_at=self.now(),
+                        rule_version_id=resolved.rule_version_id if resolved else None,
+                        rule_version_name=resolved.rule_version_name if resolved else None,
+                        rule_version_source=resolved.source if resolved else None,
                     )
                     if priority is None or recommendation.priority == priority:
                         result.append(recommendation)
