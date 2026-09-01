@@ -8,4 +8,5 @@ __pycache__/
 data/*.db
 .venv_step7/
 .lambda-build/
+.ads-scheduler-lambda-build/
 dist/

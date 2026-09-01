@@ -8,3 +8,10 @@ def test_trusted_job_is_single_call_safe_result_and_has_no_import_side_effect():
 def test_no_public_scheduled_execution_route_exists():
  from app.api.ads import router
  assert not any(route.path.endswith("run-scheduled-sync") or ("scheduled" in route.path and "post" in {method.lower() for method in route.methods or set()}) for route in router.routes)
+def test_job_uses_ads_repository_factory(monkeypatch):
+ from app.jobs import ads_historical_sync_job as job
+ class Blocked(Exception):pass
+ monkeypatch.setattr(job,"create_ads_repository",lambda:(_ for _ in ()).throw(Blocked()))
+ try:job.run_scheduled_ads_historical_sync()
+ except Blocked:pass
+ else:assert False,"repository factory was not used"
