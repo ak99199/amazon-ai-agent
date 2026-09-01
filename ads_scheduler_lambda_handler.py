@@ -13,8 +13,8 @@ def handler(event,context):
     try:
         if not AdsScheduledSyncConfig.from_environment().enabled:
             return {"status":"disabled","run_id":None,"rows_persisted":0,"message":"Scheduled historical sync is disabled."}
-        create_ads_repository(require_persistent=True)
-        return _safe_result(run_scheduled_ads_historical_sync())
+        repository=create_ads_repository(require_persistent=True)
+        return _safe_result(run_scheduled_ads_historical_sync(repository=repository))
     except AdsStorageConfigurationError:
         return {"status":"storage_blocked","run_id":None,"rows_persisted":0,"message":"Scheduled Amazon Ads Lambda execution requires persistent Ads storage."}
     except Exception:

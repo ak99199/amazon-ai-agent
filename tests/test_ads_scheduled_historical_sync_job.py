@@ -15,3 +15,11 @@ def test_job_uses_ads_repository_factory(monkeypatch):
  try:job.run_scheduled_ads_historical_sync()
  except Blocked:pass
  else:assert False,"repository factory was not used"
+def test_job_reuses_injected_repository_without_factory(monkeypatch):
+ from app.jobs import ads_historical_sync_job as job
+ repository=object();seen=[];monkeypatch.setattr(job,"create_ads_repository",lambda:(_ for _ in ()).throw(AssertionError("factory called")))
+ class Scheduled:
+  def __init__(self,config,readiness,repo,factory,now):seen.append(repo)
+  def run(self,seller,market):return AdsScheduledHistoricalSyncResult("not_due",None,None,None,0,"scheduled","safe")
+ monkeypatch.setattr(job,"AdsScheduledHistoricalSyncService",Scheduled)
+ assert job.run_scheduled_ads_historical_sync(repository=repository)["status"]=="not_due" and seen==[repository]
