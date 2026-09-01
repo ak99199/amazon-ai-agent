@@ -362,3 +362,8 @@ The scheduled Ads Lambda loads production credentials from a dedicated AWS Secre
 ```
 
 Secret values are validated and passed directly through an `AdsSettings` instance; they are never copied into process environment variables or returned by the handler. `AMAZON_ADS_PROFILE_ID`, `AMAZON_ADS_REGION`, seller and marketplace IDs, dedicated Ads DynamoDB table names, approval state, and feature/schedule flags remain non-secret runtime configuration. Actual secret, table, IAM, Lambda, and scheduler creation is deferred to Step 19A.16.5B. Keep `AMAZON_ADS_SCHEDULED_SYNC_ENABLED=false` until that infrastructure and production readiness are validated. Existing Ads behavior remains read/report-only with no advertiser mutations.
+## Step 19A.17A — Controlled Ads write gateway foundation
+
+The controlled flow is: historical data → deterministic recommendation → human approval → persisted dry-run execution plan → write preflight → **STOP**. `AMAZON_ADS_WRITE_ENABLED` defaults to `false`, and `AMAZON_ADS_WRITE_DRY_RUN_ONLY` defaults to `true`; both are independent from read and execution-plan settings and malformed values fail closed.
+
+Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.

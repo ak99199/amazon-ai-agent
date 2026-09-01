@@ -7,6 +7,8 @@ from app.config import ConfigurationError, require_dashboard_context
 from app.database.ads_repository import AdsPerformanceRepository
 from app.services.ads_action_service import AdsActionService, UnknownAdsRecommendationError
 from app.services.ads_execution_plan_service import AdsExecutionPlanService, UnknownAdsExecutionRecommendationError
+from app.services.ads_write_preflight_service import AdsWritePreflightService
+from app.amazon_ads.write_models import AdsWriteConfig
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
 from app.amazon_ads.config import AdsScheduledSyncConfig,AdsSettings
 from app.amazon_ads.auth import AdsLwaAuthenticator
@@ -54,6 +56,8 @@ class RuleVersionChangeRequest(BaseModel):
     expected_active_rule_version_id: str | None = None
 class LiveSmokeTestRequest(BaseModel):
     confirm_live_read: bool = False
+class WritePreflightRequest(BaseModel):
+    confirm_controlled_write_preflight: bool = False
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -414,6 +418,19 @@ def dry_run(recommendation_id: str, window: int = Query(30)):
         raise
     except Exception:
         raise HTTPException(503, "Execution planning is unavailable") from None
+
+@router.post("/execution-plans/{execution_plan_id}/preflight")
+def write_preflight(execution_plan_id:str,payload:WritePreflightRequest):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:raise HTTPException(503,"Controlled Ads write preflight is unavailable")
+        repository,_,_=_services();service=AdsWritePreflightService(AdsRecommendationService(repository),repository,AdsWriteConfig.from_environment(),os.getenv("AMAZON_ADS_APPROVAL_STATUS","pending"))
+        result=service.preflight(context.seller_id,context.marketplace_id,profile_id,execution_plan_id,payload.confirm_controlled_write_preflight)
+        if result.status=="confirmation_required":raise HTTPException(400,"Explicit controlled-write preflight confirmation is required")
+        if result.status=="plan_not_found":raise HTTPException(404,"Execution plan is not available")
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Controlled Ads write preflight is unavailable") from None
 
 
 def _live_read_service():
