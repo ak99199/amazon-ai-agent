@@ -15,9 +15,9 @@ from app.services.ads_live_report_persistence_service import AdsLiveReportPersis
 from app.services.ads_production_readiness_service import AdsProductionReadinessService
 from app.services.ads_scheduled_historical_sync_service import AdsScheduledHistoricalSyncService
 
-def run_scheduled_ads_historical_sync(service=None,seller_id=None,marketplace_id=None,repository=None):
+def run_scheduled_ads_historical_sync(service=None,seller_id=None,marketplace_id=None,repository=None,settings=None):
  if service is None:
-  now=lambda:datetime.now(timezone.utc);settings=AdsSettings.from_environment();readiness=AdsProductionReadinessService(settings,AdsLiveReadConfig.from_environment());repository=repository if repository is not None else create_ads_repository();seller_id=seller_id or getenv("AMAZON_SELLER_ID");marketplace_id=marketplace_id or getenv("AMAZON_MARKETPLACE_ID")
+  now=lambda:datetime.now(timezone.utc);settings=settings if settings is not None else AdsSettings.from_environment();readiness=AdsProductionReadinessService(settings,AdsLiveReadConfig.from_environment());repository=repository if repository is not None else create_ads_repository();seller_id=seller_id or getenv("AMAZON_SELLER_ID");marketplace_id=marketplace_id or getenv("AMAZON_MARKETPLACE_ID")
   def execution_factory():
    reporting=SponsoredProductsReportingService()
    def dependencies():client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),reporting

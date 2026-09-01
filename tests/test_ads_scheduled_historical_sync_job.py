@@ -23,3 +23,12 @@ def test_job_reuses_injected_repository_without_factory(monkeypatch):
   def run(self,seller,market):return AdsScheduledHistoricalSyncResult("not_due",None,None,None,0,"scheduled","safe")
  monkeypatch.setattr(job,"AdsScheduledHistoricalSyncService",Scheduled)
  assert job.run_scheduled_ads_historical_sync(repository=repository)["status"]=="not_due" and seen==[repository]
+def test_job_reuses_injected_settings_without_environment_lookup(monkeypatch):
+ from app.amazon_ads.config import AdsSettings
+ from app.jobs import ads_historical_sync_job as job
+ settings=AdsSettings("id","client-value","refresh-value","profile","FE");seen=[];monkeypatch.setattr(job.AdsSettings,"from_environment",lambda:(_ for _ in ()).throw(AssertionError("environment lookup")))
+ class Scheduled:
+  def __init__(self,config,readiness,repo,factory,now):seen.append(readiness.settings)
+  def run(self,seller,market):return AdsScheduledHistoricalSyncResult("not_due",None,None,None,0,"scheduled","safe")
+ monkeypatch.setattr(job,"AdsScheduledHistoricalSyncService",Scheduled)
+ assert job.run_scheduled_ads_historical_sync(repository=object(),settings=settings)["status"]=="not_due" and seen==[settings]

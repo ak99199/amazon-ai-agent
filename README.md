@@ -349,3 +349,16 @@ The build-ready handler is `ads_scheduler_lambda_handler.handler`. Build its Lin
 Set `AMAZON_ADS_STORAGE_BACKEND=dynamodb`, `AMAZON_ADS_DYNAMODB_PERFORMANCE_TABLE=<table name>`, and `AMAZON_ADS_DYNAMODB_SYNC_RUNS_TABLE=<table name>` only after dedicated Ads resources exist. The performance table uses String keys `scope_key` (partition) and `performance_key` (sort). The sync table uses String keys `scope_key` (partition) and `run_key` (sort); no GSI is required for the current historical pipeline.
 
 Validated performance batches use transactional, idempotent logical-grain puts. `LOCK` owns same-scope concurrency, `RUN#...` items retain attempt history, and `SUMMARY#...` items provide deterministic latest success/failure lookup. Normal and stale terminalization conditionally update the run, matching lock, and summaries in one transaction. Local SQLite remains supported. This code does not create tables, IAM permissions, Lambda resources, or EventBridge schedules; those deployment prerequisites remain for Step 19A.16.5. Scheduling remains disabled by default and no advertiser mutations are added.
+## Step 19A.16.5A — Secure Amazon Ads Lambda credentials
+
+The scheduled Ads Lambda loads production credentials from a dedicated AWS Secrets Manager secret referenced by the non-secret `AMAZON_ADS_SECRET_ARN` environment variable. Its JSON shape is:
+
+```json
+{
+  "AMAZON_ADS_CLIENT_ID": "...",
+  "AMAZON_ADS_CLIENT_SECRET": "...",
+  "AMAZON_ADS_REFRESH_TOKEN": "..."
+}
+```
+
+Secret values are validated and passed directly through an `AdsSettings` instance; they are never copied into process environment variables or returned by the handler. `AMAZON_ADS_PROFILE_ID`, `AMAZON_ADS_REGION`, seller and marketplace IDs, dedicated Ads DynamoDB table names, approval state, and feature/schedule flags remain non-secret runtime configuration. Actual secret, table, IAM, Lambda, and scheduler creation is deferred to Step 19A.16.5B. Keep `AMAZON_ADS_SCHEDULED_SYNC_ENABLED=false` until that infrastructure and production readiness are validated. Existing Ads behavior remains read/report-only with no advertiser mutations.
