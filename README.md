@@ -274,3 +274,11 @@ The production transition is explicitly gated: Approval → Credential Configura
 The authenticated, CSRF-protected `POST /api/ads/live-smoke-test` accepts only `confirm_live_read`. When every production gate passes, it refreshes authentication through the existing LwA boundary and performs one bounded, profile-scoped Sponsored Products campaign read. Results contain only safe status, timing, region, presence indicators, stage, safe HTTP status, and bounded record counts; tokens, credentials, headers, and raw remote payloads are never returned or persisted.
 
 Step 19A.15A adds no Amazon Ads write, scheduled sync, autonomous activation, AWS change, or deployment.
+
+## Step 19A.15B.1 — Profile + Campaign Live Read Validation
+
+The explicit validation flow is: Production Readiness → Manual Confirmation → Profile Discovery and Configured-ID Match → One Bounded Sponsored Products Campaign GET → Row-Isolated Structural Validation → Safe Diagnostics. The configured advertiser profile remains authoritative and is never replaced or auto-selected from discovered profiles.
+
+Campaign validation requests one page of at most ten records, reuses existing profile-scoped GET and campaign normalization boundaries, and reports only safe profile metadata plus received, valid, invalid, and duplicate counts. Malformed rows are isolated and raw Amazon payloads are never returned or persisted.
+
+This step is read-only. It adds no campaign mutation, keyword or target read, report API call, ingestion, scheduler, AWS change, or deployment.

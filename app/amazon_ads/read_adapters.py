@@ -7,6 +7,10 @@ from app.amazon_ads.live_models import AdsLiveAdGroup, AdsLiveTarget
 class SponsoredProductsReadAdapter:
     def __init__(self,client,max_pages=10,page_size=100): self.client=client; self.max_pages=max(1,min(max_pages,100));self.page_size=max(1,min(page_size,100))
     def campaigns(self,profile_id): return [SponsoredProductsCampaignsService._normalize(profile_id,item) for item in self._pages("/sp/campaigns",profile_id,"campaigns") if isinstance(item,dict)]
+    def first_campaign_page(self,profile_id,max_results=10):
+        payload=self.client.get_profile_scoped("/sp/campaigns",params={"maxResults":max(1,min(int(max_results),10))},profile_id=profile_id)
+        rows=payload if isinstance(payload,list) else payload.get("campaigns",[]) if isinstance(payload,dict) else None
+        return rows if isinstance(rows,list) else None
     def keywords(self,profile_id): return [SponsoredProductsKeywordsService._normalize(profile_id,item,"keyword") for item in self._pages("/sp/keywords",profile_id,"keywords") if isinstance(item,dict)]
     def targets(self,profile_id):
         return [self._target(item) for item in self._pages("/sp/targets",profile_id,"targets") if isinstance(item,dict) and item.get("targetId") is not None]

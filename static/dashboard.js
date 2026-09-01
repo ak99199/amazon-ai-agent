@@ -59,3 +59,13 @@ document.querySelectorAll(".ads-live-smoke-test").forEach(button => {
     const result=await response.json();window.alert(response.ok ? result.message : (result.detail||"Live smoke test is unavailable."));
   });
 });
+
+document.querySelectorAll(".ads-live-entity-validation").forEach(button => {
+  button.addEventListener("click", async () => {
+    if (!window.confirm("Validate the configured Amazon Ads profile and perform one bounded, read-only campaign GET?")) return;
+    const panel=button.closest(".ads-live-readiness");
+    const response=await fetch("/api/ads/live-entity-validation",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":panel.dataset.csrf},body:JSON.stringify({confirm_live_read:true})});
+    const result=await response.json();
+    if(response.ok) window.alert(`Profile: ${result.profile.matched ? "Matched" : "Not Found"}. Campaigns — received ${result.campaigns.records_received}, valid ${result.campaigns.records_valid}, invalid ${result.campaigns.records_invalid}, duplicates ${result.campaigns.duplicate_count}.`); else window.alert(result.detail||"Live entity validation is unavailable.");
+  });
+});
