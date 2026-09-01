@@ -19,3 +19,12 @@ class AdsManualSyncResult:
         for field in ("start_date","end_date","started_at","finished_at"):
             if result[field] is not None:result[field]=result[field].isoformat()
         return result
+
+@dataclass(frozen=True)
+class AdsManualHistoricalSyncResult:
+    status:str;run_id:str|None;started_at:datetime|None;completed_at:datetime|None;rows_persisted:int;valid_empty:bool;message:str;error_code:str|None=None
+    def public_dict(self):
+        result=asdict(self)
+        for field in ("started_at","completed_at"):
+            if result[field] is not None:result[field]=result[field].isoformat()
+        return result

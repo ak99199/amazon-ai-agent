@@ -12,8 +12,9 @@ class AdsSyncGateService:
         start_date,end_date=self._dates(start_date,end_date,window_days,today)
         approval=(self.approval_status or getenv("AMAZON_ADS_APPROVAL_STATUS","pending")).lower();config=not self.settings.missing_auth_fields;selected=bool(profile_id)
         active=self.repository.has_active_sync(seller_id,marketplace_id,profile_id,self.now()-timedelta(minutes=30)) if profile_id else False
-        recent=self.repository.latest_sync_run(seller_id,marketplace_id,profile_id) if profile_id else None
-        cooldown=bool(recent and recent["started_at"] and datetime.fromisoformat(recent["started_at"]) > self.now()-timedelta(seconds=max(0,self.cooldown_seconds)))
+        recent=self.repository.latest_successful_sync(seller_id,marketplace_id,profile_id) if profile_id else None
+        recent_at=recent.finished_at or recent.started_at if recent else None
+        cooldown=bool(recent_at and recent_at > self.now()-timedelta(seconds=max(0,self.cooldown_seconds)))
         checks=[]; add=lambda name,passed,reason:checks.append({"name":name,"passed":passed,"reason":reason})
         if self.live_config.use_mock_data: mode="mock";add("MOCK_MODE",True,"Injected mock/local data mode is enabled.")
         elif not self.live_config.live_read_enabled: mode=None;add("FEATURE_FLAG",False,"Live read is disabled and mock mode is off.")

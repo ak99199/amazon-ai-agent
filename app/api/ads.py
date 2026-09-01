@@ -38,6 +38,8 @@ from app.amazon_ads.report_transport import AdsReportTransport
 from app.amazon_ads.reporting import SponsoredProductsReportingService
 from app.services.ads_live_report_lifecycle_validation_service import AdsLiveReportLifecycleValidationService
 from app.services.ads_live_report_download_validation_service import AdsLiveReportDownloadValidationService
+from app.services.ads_live_report_persistence_service import AdsLiveReportPersistenceService
+from app.services.ads_manual_historical_sync_service import AdsManualHistoricalSyncService,HISTORICAL_SYNC_MODE
 
 router = APIRouter(prefix="/api/ads", tags=["ads"])
 
@@ -99,6 +101,13 @@ def _live_report_download_validation_service():
         settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),reporting
     lifecycle=AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5)
     return AdsLiveReportDownloadValidationService(lifecycle,reporting,row_limit=100,compressed_limit=1048576,decompressed_limit=5242880)
+
+def _manual_historical_sync_service(repository,context):
+    readiness=_production_readiness_service();reporting=SponsoredProductsReportingService()
+    def dependency_factory():
+        settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),reporting
+    lifecycle=AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5);download=AdsLiveReportDownloadValidationService(lifecycle,reporting,row_limit=100,compressed_limit=1048576,decompressed_limit=5242880);persistence=AdsLiveReportPersistenceService(download,repository,context.seller_id,context.marketplace_id);gate=AdsSyncGateService(readiness.settings,repository,readiness.config,readiness.approval_status)
+    return AdsManualHistoricalSyncService(readiness,gate,repository,persistence,lambda:datetime.now(timezone.utc))
 
 def _rule_scope():
     context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
@@ -453,6 +462,25 @@ def sync_runs(limit:int=Query(20,ge=1,le=100)):
         return {"runs":[item.public_dict() for item in repository.list_sync_runs(context.seller_id,context.marketplace_id,profile_id,limit)]}
     except Exception:
         raise HTTPException(503,"Ads sync is unavailable") from None
+
+@router.get("/historical-sync-runs")
+def historical_sync_runs(limit:int=Query(20,ge=1,le=100)):
+    try:
+        context=_context();repository,_,_=_services();profile_id=AdsSettings.from_environment().profile_id
+        return {"runs":[item.public_dict() for item in repository.list_sync_runs(context.seller_id,context.marketplace_id,profile_id,limit,HISTORICAL_SYNC_MODE)]}
+    except Exception:raise HTTPException(503,"Historical Ads sync history is unavailable") from None
+
+@router.post("/manual-historical-sync")
+def manual_historical_sync(payload:LiveSmokeTestRequest):
+    try:
+        context=_context();repository,_,_=_services();result=_manual_historical_sync_service(repository,context).run(context.seller_id,context.marketplace_id,payload.confirm_live_read)
+        if result.status=="blocked_confirmation":raise HTTPException(400,"Explicit live-read confirmation is required")
+        if result.status=="blocked_readiness":raise HTTPException(422,result.message)
+        if result.status=="already_running":raise HTTPException(409,result.message)
+        if result.status=="cooldown_active":raise HTTPException(429,result.message)
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Historical Ads sync is unavailable") from None
 
 
 @router.post("/sync")

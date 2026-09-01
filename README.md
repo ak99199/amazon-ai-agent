@@ -310,3 +310,11 @@ This validation performs no persistence, sync-run creation, scheduling, recommen
 The internal flow is: Readiness → Explicit Confirmation → One Historical Report → Download and Fully Validate → Existing Ads Historical Repository → Transactional Idempotent Upsert. Only `success` or `valid_empty` campaign DAILY results may reach the repository; partial or failed reports perform zero performance-row writes.
 
 Rows use authoritative server-side seller, marketplace, and profile scope. The existing logical grain remains seller + marketplace + profile + date + Sponsored Products + campaign dimension, so replay is idempotent and corrected metrics update the existing row. Persistence is local only: there is no public endpoint yet, sync-run creation, scheduler, automatic recommendation processing, advertiser mutation, AWS change, or deployment.
+
+## Step 19A.15C.3.2.1 — Manual Historical Sync Orchestration
+
+The controlled flow is: Authentication → CSRF → Explicit Confirmation → Production Readiness → Scope-Level Concurrency → Successful-Run Cooldown → Sync Run → Historical Report Persistence → Terminal Run Status. `POST /api/ads/manual-historical-sync` accepts only `confirm_live_read`; all seller, marketplace, profile, dates, region, and report configuration remain server-controlled.
+
+Historical attempts reuse `ads_sync_runs` with mode `historical_campaign_report`. Start is atomically rejected when a same-scope Ads sync is active, and the existing configurable manual-sync cooldown is anchored only to the latest successful terminal run. `GET /api/ads/historical-sync-runs` returns bounded, latest-first, scope-isolated history.
+
+This workflow is manual only. It creates no scheduler, background worker, force/bypass option, automatic recommendation work, advertiser mutation, AWS resource, or deployment. Amazon activity remains limited to authentication and report create/status/download operations; only fully validated local performance rows are persisted.

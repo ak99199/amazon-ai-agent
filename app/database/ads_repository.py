@@ -195,12 +195,21 @@ class AdsPerformanceRepository:
         self.initialize();values=(run.sync_id,run.seller_id,run.marketplace_id,run.profile_id,run.mode,run.start_date.isoformat(),run.end_date.isoformat(),run.started_at.isoformat(),run.finished_at.isoformat() if run.finished_at else None,run.status,int(run.success),run.campaigns_fetched,run.ad_groups_fetched,run.keywords_fetched,run.targets_fetched,run.report_rows_received,run.rows_normalized,run.rows_saved,run.rows_failed,run.error_code,run.safe_error_message,run.started_at.isoformat())
         with get_connection(self._database_path) as connection:connection.execute("INSERT INTO ads_sync_runs(sync_id,seller_id,marketplace_id,profile_id,mode,start_date,end_date,started_at,finished_at,status,success,campaigns_fetched,ad_groups_fetched,keywords_fetched,targets_fetched,report_rows_received,rows_normalized,rows_saved,rows_failed,error_code,error_summary,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET finished_at=excluded.finished_at,status=excluded.status,success=excluded.success,campaigns_fetched=excluded.campaigns_fetched,ad_groups_fetched=excluded.ad_groups_fetched,keywords_fetched=excluded.keywords_fetched,targets_fetched=excluded.targets_fetched,report_rows_received=excluded.report_rows_received,rows_normalized=excluded.rows_normalized,rows_saved=excluded.rows_saved,rows_failed=excluded.rows_failed,error_code=excluded.error_code,error_summary=excluded.error_summary",values)
         return run
+    def start_sync_run_if_idle(self,run,not_before):
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            active=connection.execute("SELECT 1 FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND status IN ('starting','running') AND started_at>=? LIMIT 1",(run.seller_id,run.marketplace_id,str(run.profile_id) if run.profile_id else None,not_before.isoformat())).fetchone()
+            if active:return False
+            values=(run.sync_id,run.seller_id,run.marketplace_id,str(run.profile_id) if run.profile_id else None,run.mode,run.start_date.isoformat(),run.end_date.isoformat(),run.started_at.isoformat(),None,run.status,int(run.success),0,0,0,0,0,0,0,0,None,None,run.started_at.isoformat())
+            connection.execute("INSERT INTO ads_sync_runs(sync_id,seller_id,marketplace_id,profile_id,mode,start_date,end_date,started_at,finished_at,status,success,campaigns_fetched,ad_groups_fetched,keywords_fetched,targets_fetched,report_rows_received,rows_normalized,rows_saved,rows_failed,error_code,error_summary,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",values)
+            return True
     def latest_sync_run(self,seller_id,marketplace_id,profile_id):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? ORDER BY started_at DESC, rowid DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None)).fetchone()
-    def list_sync_runs(self,seller_id,marketplace_id,profile_id,limit=20):
-        self.initialize()
-        with get_connection(self._database_path) as connection:rows=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? ORDER BY started_at DESC, rowid DESC LIMIT ?",(seller_id,marketplace_id,str(profile_id) if profile_id else None,max(1,min(limit,100)))).fetchall()
+    def list_sync_runs(self,seller_id,marketplace_id,profile_id,limit=20,mode=None):
+        self.initialize();mode_clause="" if mode is None else " AND mode=?";values=(seller_id,marketplace_id,str(profile_id) if profile_id else None) if mode is None else (seller_id,marketplace_id,str(profile_id) if profile_id else None,mode)
+        with get_connection(self._database_path) as connection:rows=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ?"+mode_clause+" ORDER BY started_at DESC, rowid DESC LIMIT ?",(*values,max(1,min(limit,100)))).fetchall()
         return [self._sync_run(row) for row in rows]
     def has_active_sync(self,seller_id,marketplace_id,profile_id,not_before):
         self.initialize()
