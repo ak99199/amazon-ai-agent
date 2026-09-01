@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS idx_ads_execution_plans_scope_created ON ads_executio
 CREATE TABLE IF NOT EXISTS ads_execution_events (event_id TEXT PRIMARY KEY,execution_plan_id TEXT NOT NULL,recommendation_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_ads_execution_events_scope ON ads_execution_events(seller_id,marketplace_id,profile_id,created_at DESC);CREATE TABLE IF NOT EXISTS ads_sync_runs (sync_id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT,mode TEXT NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,started_at TEXT NOT NULL,finished_at TEXT,status TEXT NOT NULL,success INTEGER NOT NULL,campaigns_fetched INTEGER NOT NULL,ad_groups_fetched INTEGER NOT NULL,keywords_fetched INTEGER NOT NULL,targets_fetched INTEGER NOT NULL,report_rows_received INTEGER NOT NULL,rows_normalized INTEGER NOT NULL,rows_saved INTEGER NOT NULL,rows_failed INTEGER NOT NULL,error_code TEXT,error_summary TEXT,created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_ads_sync_runs_scope_started ON ads_sync_runs(seller_id,marketplace_id,profile_id,started_at DESC);
-CREATE INDEX IF NOT EXISTS idx_ads_sync_runs_status_started ON ads_sync_runs(status,started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ads_sync_runs_status_started ON ads_sync_runs(status,started_at DESC);CREATE TABLE IF NOT EXISTS ads_rule_versions (rule_version_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,version_name TEXT NOT NULL,status TEXT NOT NULL,thresholds_json TEXT NOT NULL,source TEXT NOT NULL,created_by TEXT NOT NULL,notes TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(rule_version_id,seller_id,marketplace_id,profile_id));CREATE TABLE IF NOT EXISTS ads_rule_tuning_proposals (proposal_id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,base_rule_version_id TEXT NOT NULL,parameter_name TEXT NOT NULL,current_value TEXT NOT NULL,proposed_value TEXT NOT NULL,direction TEXT NOT NULL,reason_code TEXT NOT NULL,reason_summary TEXT NOT NULL,sample_size INTEGER NOT NULL,confidence TEXT NOT NULL,status TEXT NOT NULL,evaluation_summary_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,reviewed_at TEXT);CREATE TABLE IF NOT EXISTS ads_rule_tuning_events (event_id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,created_at TEXT NOT NULL);
 """
 
 
@@ -199,6 +199,25 @@ class AdsPerformanceRepository:
     def aggregate_sync_counts_since(self,seller_id,marketplace_id,profile_id,since):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT COALESCE(SUM(rows_saved),0),COALESCE(SUM(rows_failed),0) FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND started_at>=?",(seller_id,marketplace_id,str(profile_id) if profile_id else None,since.isoformat())).fetchone()
+    def save_rule_tuning_proposal(self, proposal):
+        self.initialize()
+        values=(proposal.proposal_id,proposal.seller_id,proposal.marketplace_id,proposal.profile_id,proposal.base_rule_version_id,proposal.parameter_name,str(proposal.current_value),str(proposal.proposed_value),proposal.direction,proposal.reason_code,proposal.reason_summary,proposal.sample_size,proposal.confidence,proposal.status,json.dumps(proposal.evaluation_summary,sort_keys=True),proposal.created_at.isoformat(),proposal.created_at.isoformat(),proposal.reviewed_at.isoformat() if proposal.reviewed_at else None)
+        with get_connection(self._database_path) as connection:
+            connection.execute("INSERT INTO ads_rule_tuning_proposals VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(proposal_id) DO NOTHING",values)
+            connection.execute("INSERT OR IGNORE INTO ads_rule_tuning_events(event_id,proposal_id,seller_id,marketplace_id,profile_id,event_type,created_at) VALUES(?,?,?,?,?,?,?)",(proposal.proposal_id+"-created",proposal.proposal_id,proposal.seller_id,proposal.marketplace_id,proposal.profile_id,"PROPOSAL_CREATED",proposal.created_at.isoformat()))
+        return proposal
+    def review_rule_tuning_proposal(self,seller,marketplace,profile,proposal_id,status,reviewed_at):
+        if status not in ("approved_for_future_rule_version","rejected","dismissed"): raise ValueError("Invalid rule-tuning decision")
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            row=connection.execute("SELECT * FROM ads_rule_tuning_proposals WHERE proposal_id=? AND seller_id=? AND marketplace_id=? AND profile_id=?",(proposal_id,seller,marketplace,str(profile))).fetchone()
+            if not row: return None
+            connection.execute("UPDATE ads_rule_tuning_proposals SET status=?,updated_at=?,reviewed_at=? WHERE proposal_id=? AND seller_id=? AND marketplace_id=? AND profile_id=?",(status,reviewed_at.isoformat(),reviewed_at.isoformat(),proposal_id,seller,marketplace,str(profile)))
+            connection.execute("INSERT INTO ads_rule_tuning_events(event_id,proposal_id,seller_id,marketplace_id,profile_id,event_type,created_at) VALUES(?,?,?,?,?,?,?)",(proposal_id+"-"+status,proposal_id,seller,marketplace,str(profile),{"approved_for_future_rule_version":"PROPOSAL_APPROVED","rejected":"PROPOSAL_REJECTED","dismissed":"PROPOSAL_DISMISSED"}[status],reviewed_at.isoformat()))
+        return status
+    def list_rule_tuning_proposals(self,seller,marketplace,profile,limit=100):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_rule_tuning_proposals WHERE seller_id=? AND marketplace_id=? AND profile_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?",(seller,marketplace,str(profile),max(1,min(limit,200)))).fetchall()
     @staticmethod
     def _sync_run(item):
         return AdsManualSyncResult(item["sync_id"],item["mode"],item["seller_id"],item["marketplace_id"],item["profile_id"],date.fromisoformat(item["start_date"]),date.fromisoformat(item["end_date"]),datetime.fromisoformat(item["started_at"]),datetime.fromisoformat(item["finished_at"]) if item["finished_at"] else None,bool(item["success"]),item["status"],item["campaigns_fetched"],item["ad_groups_fetched"],item["keywords_fetched"],item["targets_fetched"],item["report_rows_received"],item["rows_normalized"],item["rows_saved"],item["rows_failed"],item["error_code"],item["error_summary"])

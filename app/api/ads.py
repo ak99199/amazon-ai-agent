@@ -1,7 +1,7 @@
 """Authenticated Ads visibility and internal human-review endpoints; no Ads execution."""
 import os
 from fastapi import APIRouter, HTTPException, Query
-from datetime import date
+from datetime import date, datetime, timezone
 from pydantic import BaseModel, Field
 from app.config import ConfigurationError, require_dashboard_context
 from app.database.ads_repository import AdsPerformanceRepository
@@ -20,6 +20,8 @@ from app.services.ads_manual_sync_service import AdsManualSyncService
 from app.services.ads_sync_observability_service import AdsSyncObservabilityService
 from app.services.ads_intelligence_service import AdsIntelligenceService
 from app.services.ads_recommendation_effectiveness_service import AdsRecommendationEffectivenessService
+from app.services.ads_rule_tuning_proposal_service import AdsRuleTuningProposalService
+from app.amazon_ads.rule_versions import AdsRuleVersions
 from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
 from app.services.ads_recommendation_service import AdsRecommendationService
@@ -28,6 +30,8 @@ from app.services.ads_signal_service import AdsRecommendationConfigurationError
 router = APIRouter(prefix="/api/ads", tags=["ads"])
 
 
+class RuleTuningDecisionRequest(BaseModel):
+    status: str
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -134,6 +138,37 @@ def effectiveness_feedback(window: int = Query(30), limit: int = Query(100, ge=1
     except Exception:
         raise HTTPException(503, "Ads recommendation effectiveness is unavailable") from None
 
+@router.get("/rule-tuning")
+def rule_tuning(window: int = Query(90)):
+    if window not in (30,60,90): raise HTTPException(422,"Unsupported rule-tuning window")
+    try:
+        context=_context(); repository,_,_=_services(); profile=AdsSettings.from_environment().profile_id
+        effectiveness=AdsRecommendationEffectivenessService(repository)
+        return AdsRuleTuningProposalService(repository,effectiveness).generate(context.seller_id,context.marketplace_id,profile,window)
+    except Exception: raise HTTPException(503,"Rule tuning analysis unavailable") from None
+
+@router.get("/rule-tuning/proposals")
+def rule_tuning_proposals(limit:int=Query(100,ge=1,le=200)):
+    try:
+        context=_context(); repository,_,_=_services(); profile=AdsSettings.from_environment().profile_id
+        fields=("proposal_id","base_rule_version_id","parameter_name","current_value","proposed_value","direction","reason_code","reason_summary","sample_size","confidence","status","evaluation_summary_json","created_at","reviewed_at")
+        return {"proposals":[{field:row[field] for field in fields} for row in repository.list_rule_tuning_proposals(context.seller_id,context.marketplace_id,profile,limit)]}
+    except Exception: raise HTTPException(503,"Rule tuning analysis unavailable") from None
+@router.get("/rule-tuning/versions")
+def rule_tuning_versions():
+    try:
+        context=_context(); profile=AdsSettings.from_environment().profile_id
+        return {"baseline": AdsRuleVersions.baseline(context.seller_id,context.marketplace_id,profile).public_dict()}
+    except Exception: raise HTTPException(503,"Rule tuning analysis unavailable") from None
+
+@router.post("/rule-tuning/proposals/{proposal_id}/decision")
+def rule_tuning_decision(proposal_id:str,payload:RuleTuningDecisionRequest):
+    try:
+        context=_context();repository,_,_=_services();profile=AdsSettings.from_environment().profile_id
+        result=repository.review_rule_tuning_proposal(context.seller_id,context.marketplace_id,profile,proposal_id,payload.status,datetime.now(timezone.utc))
+        if result is None: raise HTTPException(404,"Rule tuning proposal is not available")
+        return {"proposal_id":proposal_id,"status":result,"active_rules_changed":False}
+    except ValueError: raise HTTPException(422,"Invalid rule-tuning decision") from None
 @router.get("/actions")
 def actions(window: int = Query(30), status: str | None = Query(None), priority: str | None = Query(None), limit: int = Query(50, ge=1, le=200)):
     if window not in AdsRecommendationService.allowed_windows or status not in (None, "pending", "approved", "rejected", "dismissed") or priority not in (None, "low", "medium", "high", "critical"):

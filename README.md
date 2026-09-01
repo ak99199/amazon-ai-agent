@@ -252,3 +252,9 @@ Decision effectiveness uses the existing, seller/marketplace/profile-scoped huma
 New decisions capture one immutable, safe deterministic recommendation snapshot at review time. Older decisions correctly report unavailable snapshot context rather than reconstructing historical metrics from current data. The dashboard labels recurring approval/rejection patterns as human-review patterns only.
 
 Feedback analytics do not automatically change recommendation rules or Amazon Ads settings. There is no autonomous learning, threshold tuning, scheduler, Amazon Ads write, or execution in this phase.
+
+## Step 19A.13 — Offline Threshold Evaluation
+
+Rule-tuning proposals are generated only from reviewed, safe historical feedback snapshots. The bounded offline evaluator uses the existing active/default thresholds as an immutable baseline and never wires proposed values into the recommendation engine. `GET /api/ads/rule-tuning` generates review-only candidates for 30/60/90-day windows; `GET /api/ads/rule-tuning/proposals` lists persisted proposals.
+
+No automatic threshold changes, active-rule switch, Amazon Ads write, execution, or scheduler is implemented.
