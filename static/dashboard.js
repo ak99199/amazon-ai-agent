@@ -33,6 +33,19 @@ document.querySelectorAll(".ads-sync-button").forEach(button => {
   });
 });
 
+document.querySelectorAll(".ads-historical-sync-button").forEach(button => {
+  button.addEventListener("click", async () => {
+    if (!window.confirm("This will create and download a read-only Amazon Ads historical report and store validated performance data locally. It will not modify campaigns, bids, budgets, keywords, or targeting. Continue?")) return;
+    const panel=button.closest(".ads-historical-sync"),resultNode=panel.querySelector(".ads-historical-sync-result");button.disabled=true;resultNode.textContent="Historical sync running...";
+    try {
+      const response=await fetch("/api/ads/manual-historical-sync",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":panel.dataset.csrf},body:JSON.stringify({confirm_live_read:true})});
+      const result=await response.json();resultNode.textContent=response.ok ? `${result.status}: ${result.rows_persisted} row(s) persisted. ${result.message}` : (result.detail||"Historical sync failed safely.");
+      await Promise.all([fetch("/api/ads/historical-sync-health"),fetch("/api/ads/historical-sync-runs?limit=10")]);
+      if(response.ok) window.location.reload(); else button.disabled=false;
+    } catch (_) {resultNode.textContent="Historical sync status unavailable.";button.disabled=false;}
+  });
+});
+
 document.querySelectorAll(".rule-version-activate").forEach(button => {
   button.addEventListener("click", async () => {
     if (!window.confirm("Activate this human-approved internal recommendation threshold version? This does not change Amazon Ads campaigns.")) return;

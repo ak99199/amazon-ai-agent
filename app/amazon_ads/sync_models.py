@@ -28,3 +28,8 @@ class AdsManualHistoricalSyncResult:
         for field in ("started_at","completed_at"):
             if result[field] is not None:result[field]=result[field].isoformat()
         return result
+
+@dataclass(frozen=True)
+class AdsHistoricalSyncHealth:
+    overall_status:str;latest_run_status:str|None;latest_run_started_at:str|None;latest_run_completed_at:str|None;last_success_at:str|None;last_success_rows_persisted:int|None;active_run:bool;cooldown_active:bool;cooldown_remaining_seconds:int;data_freshness_status:str;data_age_seconds:int|None;last_report_date:str|None;recent_success_count:int;recent_failure_count:int;recent_runs:tuple[dict[str,object],...];warnings:tuple[str,...]
+    def public_dict(self):return asdict(self)

@@ -40,6 +40,7 @@ from app.services.ads_live_report_lifecycle_validation_service import AdsLiveRep
 from app.services.ads_live_report_download_validation_service import AdsLiveReportDownloadValidationService
 from app.services.ads_live_report_persistence_service import AdsLiveReportPersistenceService
 from app.services.ads_manual_historical_sync_service import AdsManualHistoricalSyncService,HISTORICAL_SYNC_MODE
+from app.services.ads_historical_sync_health_service import AdsHistoricalSyncHealthService
 
 router = APIRouter(prefix="/api/ads", tags=["ads"])
 
@@ -108,6 +109,10 @@ def _manual_historical_sync_service(repository,context):
         settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),reporting
     lifecycle=AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5);download=AdsLiveReportDownloadValidationService(lifecycle,reporting,row_limit=100,compressed_limit=1048576,decompressed_limit=5242880);persistence=AdsLiveReportPersistenceService(download,repository,context.seller_id,context.marketplace_id);gate=AdsSyncGateService(readiness.settings,repository,readiness.config,readiness.approval_status)
     return AdsManualHistoricalSyncService(readiness,gate,repository,persistence,lambda:datetime.now(timezone.utc))
+
+def _historical_sync_health_service(repository):
+    settings=AdsSettings.from_environment();gate=AdsSyncGateService(settings,repository,AdsLiveReadConfig.from_environment())
+    return AdsHistoricalSyncHealthService(repository,gate)
 
 def _rule_scope():
     context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
@@ -469,6 +474,12 @@ def historical_sync_runs(limit:int=Query(20,ge=1,le=100)):
         context=_context();repository,_,_=_services();profile_id=AdsSettings.from_environment().profile_id
         return {"runs":[item.public_dict() for item in repository.list_sync_runs(context.seller_id,context.marketplace_id,profile_id,limit,HISTORICAL_SYNC_MODE)]}
     except Exception:raise HTTPException(503,"Historical Ads sync history is unavailable") from None
+
+@router.get("/historical-sync-health")
+def historical_sync_health():
+    try:
+        context=_context();repository,_,_=_services();return _historical_sync_health_service(repository).get(context.seller_id,context.marketplace_id).public_dict()
+    except Exception:raise HTTPException(503,"Historical Ads sync health is unavailable") from None
 
 @router.post("/manual-historical-sync")
 def manual_historical_sync(payload:LiveSmokeTestRequest):

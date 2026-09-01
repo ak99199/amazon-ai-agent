@@ -96,6 +96,10 @@ class AdsPerformanceRepository:
         self.initialize()
         with get_connection(self._database_path) as connection:
             return connection.execute("SELECT MIN(date),MAX(date) FROM ads_performance_daily WHERE seller_id=? AND marketplace_id=? AND profile_id=?", (seller_id,marketplace_id,str(profile_id))).fetchone()
+    def latest_campaign_performance_date(self,seller_id,marketplace_id,profile_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:row=connection.execute("SELECT MAX(date) FROM ads_performance_daily WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND ad_product='SP' AND campaign_id IS NOT NULL AND keyword_id IS NULL AND target_id IS NULL AND search_term IS NULL",(seller_id,marketplace_id,str(profile_id))).fetchone()
+        return date.fromisoformat(row[0]) if row and row[0] else None
 
     def count_ingestion_runs(self, seller_id, marketplace_id, profile_id, success=None):
         self.initialize()
@@ -217,11 +221,11 @@ class AdsPerformanceRepository:
     def active_sync_run(self,seller_id,marketplace_id,profile_id):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND status IN ('starting','running') ORDER BY started_at DESC, rowid DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None)).fetchone()
-    def latest_successful_sync(self,seller_id,marketplace_id,profile_id):return self._latest_sync_by_success(seller_id,marketplace_id,profile_id,True)
+    def latest_successful_sync(self,seller_id,marketplace_id,profile_id,mode=None):return self._latest_sync_by_success(seller_id,marketplace_id,profile_id,True,mode)
     def latest_failed_sync(self,seller_id,marketplace_id,profile_id):return self._latest_sync_by_success(seller_id,marketplace_id,profile_id,False)
-    def _latest_sync_by_success(self,seller_id,marketplace_id,profile_id,success):
-        self.initialize()
-        with get_connection(self._database_path) as connection:row=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND success=? ORDER BY started_at DESC, rowid DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None,int(success))).fetchone()
+    def _latest_sync_by_success(self,seller_id,marketplace_id,profile_id,success,mode=None):
+        self.initialize();mode_clause="" if mode is None else " AND mode=?";values=(seller_id,marketplace_id,str(profile_id) if profile_id else None,int(success)) if mode is None else (seller_id,marketplace_id,str(profile_id) if profile_id else None,int(success),mode)
+        with get_connection(self._database_path) as connection:row=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND success=?"+mode_clause+" ORDER BY started_at DESC, rowid DESC LIMIT 1",values).fetchone()
         return self._sync_run(row) if row else None
     def count_sync_runs_since(self,seller_id,marketplace_id,profile_id,since):
         self.initialize()

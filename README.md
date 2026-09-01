@@ -318,3 +318,11 @@ The controlled flow is: Authentication → CSRF → Explicit Confirmation → Pr
 Historical attempts reuse `ads_sync_runs` with mode `historical_campaign_report`. Start is atomically rejected when a same-scope Ads sync is active, and the existing configurable manual-sync cooldown is anchored only to the latest successful terminal run. `GET /api/ads/historical-sync-runs` returns bounded, latest-first, scope-isolated history.
 
 This workflow is manual only. It creates no scheduler, background worker, force/bypass option, automatic recommendation work, advertiser mutation, AWS resource, or deployment. Amazon activity remains limited to authentication and report create/status/download operations; only fully validated local performance rows are persisted.
+
+## Step 19A.15C.3.2.2 — Manual Historical Sync Dashboard + Observability
+
+The dashboard flow is: Production Readiness → Historical Sync Health → Explicit Browser Confirmation → Manual Historical Sync → Safe Result → Refreshed Health and Run History. The button sends only `{ "confirm_live_read": true }`, is disabled during execution and whenever readiness, concurrency, or cooldown blocks work, and offers no force or bypass control. Backend gates remain authoritative.
+
+Historical health and history are read-only database views and make zero Amazon requests. Health distinguishes no-sync, running, cooldown, healthy, stale, degraded, and failed states; freshness uses the latest stored campaign report date and treats yesterday's completed reporting day as current. `AMAZON_ADS_HISTORICAL_SYNC_STALE_AFTER_HOURS` is optional and defaults to 72 hours.
+
+The workflow remains manual-only with no scheduler, background worker, AWS change, automatic recommendation action, raw report display, signed URL exposure, or Amazon advertiser mutation.
