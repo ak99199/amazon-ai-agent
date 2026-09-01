@@ -326,3 +326,13 @@ The dashboard flow is: Production Readiness → Historical Sync Health → Expli
 Historical health and history are read-only database views and make zero Amazon requests. Health distinguishes no-sync, running, cooldown, healthy, stale, degraded, and failed states; freshness uses the latest stored campaign report date and treats yesterday's completed reporting day as current. `AMAZON_ADS_HISTORICAL_SYNC_STALE_AFTER_HOURS` is optional and defaults to 72 hours.
 
 The workflow remains manual-only with no scheduler, background worker, AWS change, automatic recommendation action, raw report display, signed URL exposure, or Amazon advertiser mutation.
+
+## Step 19A.16.1 — Scheduled Production Historical Sync Foundation
+
+The trusted callable flow is: Scheduled Sync Enabled? → Production Readiness → Same-Scope Concurrency → Cadence Due? → Existing Historical Sync Execution and Persistence → Existing Run History. `app.jobs.ads_historical_sync_job.run_scheduled_ads_historical_sync()` performs one bounded attempt when explicitly invoked; it is never called on import or application startup.
+
+Scheduled execution is disabled by default with `AMAZON_ADS_SCHEDULED_SYNC_ENABLED=false`. `AMAZON_ADS_SCHEDULED_SYNC_INTERVAL_HOURS` defaults to 24 and is bounded to 1–168 hours. Cadence is anchored only to the latest successful run whose trigger source is `scheduled`, so manual runs retain their existing confirmation/cooldown behavior without permanently shifting scheduled cadence.
+
+The existing `ads_sync_runs` table now has a backward-compatible `trigger_source` value (`manual` for existing/manual rows and `scheduled` for trusted job runs). Manual and scheduled execution share the same atomic run lifecycle, persistence pipeline, same-scope concurrency protection, and idempotent performance grain.
+
+No scheduler, EventBridge resource, cron entry, startup hook, background loop, Lambda/IAM change, AWS deployment, public scheduled-execution endpoint, advertiser mutation, force option, or retry loop is included. Amazon access remains limited to the existing read/report pipeline.

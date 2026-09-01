@@ -13,7 +13,7 @@ class AdsSyncGateResult:
 @dataclass(frozen=True)
 class AdsManualSyncResult:
     sync_id: str; mode: str; seller_id: str; marketplace_id: str; profile_id: str | None; start_date: date; end_date: date; started_at: datetime; finished_at: datetime | None; success: bool; status: str
-    campaigns_fetched:int=0;ad_groups_fetched:int=0;keywords_fetched:int=0;targets_fetched:int=0;report_rows_received:int=0;rows_normalized:int=0;rows_saved:int=0;rows_failed:int=0;error_code:str|None=None;safe_error_message:str|None=None
+    campaigns_fetched:int=0;ad_groups_fetched:int=0;keywords_fetched:int=0;targets_fetched:int=0;report_rows_received:int=0;rows_normalized:int=0;rows_saved:int=0;rows_failed:int=0;error_code:str|None=None;safe_error_message:str|None=None;trigger_source:str="manual"
     def public_dict(self):
         result=asdict(self)
         for field in ("start_date","end_date","started_at","finished_at"):
@@ -33,3 +33,12 @@ class AdsManualHistoricalSyncResult:
 class AdsHistoricalSyncHealth:
     overall_status:str;latest_run_status:str|None;latest_run_started_at:str|None;latest_run_completed_at:str|None;last_success_at:str|None;last_success_rows_persisted:int|None;active_run:bool;cooldown_active:bool;cooldown_remaining_seconds:int;data_freshness_status:str;data_age_seconds:int|None;last_report_date:str|None;recent_success_count:int;recent_failure_count:int;recent_runs:tuple[dict[str,object],...];warnings:tuple[str,...]
     def public_dict(self):return asdict(self)
+
+@dataclass(frozen=True)
+class AdsScheduledHistoricalSyncResult:
+    status:str;run_id:str|None;started_at:datetime|None;completed_at:datetime|None;rows_persisted:int;trigger_source:str;message:str;error_code:str|None=None
+    def public_dict(self):
+        result=asdict(self)
+        for field in ("started_at","completed_at"):
+            if result[field] is not None:result[field]=result[field].isoformat()
+        return result

@@ -23,3 +23,13 @@ class AdsSettings:
         self.require_auth()
         if not self.profile_id:raise AdsConfigurationError("Amazon Ads profile API is not configured")
         return self
+
+@dataclass(frozen=True)
+class AdsScheduledSyncConfig:
+    enabled:bool=False;interval_hours:int=24
+    @classmethod
+    def from_environment(cls):
+        enabled=(getenv("AMAZON_ADS_SCHEDULED_SYNC_ENABLED","false").strip().lower()=="true")
+        try:interval=int(getenv("AMAZON_ADS_SCHEDULED_SYNC_INTERVAL_HOURS","24"))
+        except ValueError:interval=24
+        return cls(enabled,max(1,min(interval,168)))
