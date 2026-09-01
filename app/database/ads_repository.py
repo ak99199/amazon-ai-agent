@@ -223,8 +223,21 @@ class AdsPerformanceRepository:
     def active_sync_run(self,seller_id,marketplace_id,profile_id):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND status IN ('starting','running') ORDER BY started_at DESC, rowid DESC LIMIT 1",(seller_id,marketplace_id,str(profile_id) if profile_id else None)).fetchone()
+    def finalize_stale_sync_run(self,run_id,seller_id,marketplace_id,profile_id,cutoff,finished_at):
+        """Atomically fail only the still-running, same-scope stale attempt."""
+        self.initialize()
+        with get_connection(self._database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            changed=connection.execute("UPDATE ads_sync_runs SET finished_at=?,status='failed',success=0,error_code='stale_run_timeout',error_summary='Previous Ads sync exceeded the allowed running window and was finalized as failed.' WHERE sync_id=? AND seller_id=? AND marketplace_id=? AND profile_id IS ? AND status='running' AND started_at<=?",(finished_at.isoformat(),run_id,seller_id,marketplace_id,str(profile_id) if profile_id else None,cutoff.isoformat())).rowcount
+            return changed==1
     def latest_successful_sync(self,seller_id,marketplace_id,profile_id,mode=None,trigger_source=None):return self._latest_sync_by_success(seller_id,marketplace_id,profile_id,True,mode,trigger_source)
-    def latest_failed_sync(self,seller_id,marketplace_id,profile_id):return self._latest_sync_by_success(seller_id,marketplace_id,profile_id,False)
+    def latest_failed_sync(self,seller_id,marketplace_id,profile_id,mode=None,trigger_source=None):
+        self.initialize();clauses=[];values=[seller_id,marketplace_id,str(profile_id) if profile_id else None]
+        if mode is not None:clauses.append("mode=?");values.append(mode)
+        if trigger_source is not None:clauses.append("trigger_source=?");values.append(trigger_source)
+        extra="" if not clauses else " AND "+" AND ".join(clauses)
+        with get_connection(self._database_path) as connection:row=connection.execute("SELECT * FROM ads_sync_runs WHERE seller_id=? AND marketplace_id=? AND profile_id IS ? AND status='failed'"+extra+" ORDER BY started_at DESC, rowid DESC LIMIT 1",values).fetchone()
+        return self._sync_run(row) if row else None
     def _latest_sync_by_success(self,seller_id,marketplace_id,profile_id,success,mode=None,trigger_source=None):
         self.initialize();clauses=[];values=[seller_id,marketplace_id,str(profile_id) if profile_id else None,int(success)]
         if mode is not None:clauses.append("mode=?");values.append(mode)

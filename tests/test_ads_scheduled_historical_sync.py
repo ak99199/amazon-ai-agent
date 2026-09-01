@@ -12,6 +12,7 @@ class Repo:
  def __init__(self,previous=None,active=None):self.previous=previous;self.active=active;self.calls=[]
  def active_sync_run(self,*scope):self.calls.append(("active",scope));return self.active
  def latest_successful_sync(self,*args):self.calls.append(("latest",args));return self.previous
+ def finalize_stale_sync_run(self,*args):self.calls.append(("recover",args));self.active=None;return True
 class Execution:
  def __init__(self,status="succeeded",rows=2):self.status=status;self.rows=rows;self.calls=[]
  def execute(self,*args):self.calls.append(args);return AdsManualHistoricalSyncResult(self.status,"run",NOW,NOW,self.rows,self.rows==0,"safe",None if self.status=="succeeded" else "remote_error")
@@ -35,6 +36,15 @@ def test_manual_success_does_not_anchor_scheduled_cadence():
 def test_same_scope_active_manual_or_scheduled_blocks_without_execution():
  for trigger in ("manual","scheduled"):
   svc,repo,execution,factories=service(repo=Repo(active=prior(NOW,trigger=trigger)));assert svc.run("seller","market").status=="already_running" and factories==[] and execution.calls==[]
+def test_stale_run_is_recovered_before_new_execution():
+ stale=AdsManualSyncResult("stale","historical_campaign_report","seller","market","profile",date(2026,2,8),date(2026,2,9),NOW-timedelta(hours=6),None,False,"running",trigger_source="scheduled")
+ svc,repo,execution,factories=service(repo=Repo(active=stale));result=svc.run("seller","market")
+ assert result.status=="succeeded" and any(call[0]=="recover" for call in repo.calls) and len(execution.calls)==1
+def test_recovery_failure_fails_closed_without_execution():
+ class Broken(Repo):
+  def active_sync_run(self,*scope):raise RuntimeError("private database failure")
+ svc,repo,execution,factories=service(repo=Broken());result=svc.run("seller","market")
+ assert result.status=="unavailable" and result.error_code=="stale_recovery_error" and factories==[] and execution.calls==[] and "private" not in result.message
 def test_different_profile_is_not_globally_blocked():
  svc,repo,execution,factories=service(repo=Repo(active=None));assert svc.run("seller","market").status=="succeeded"
 @pytest.mark.parametrize("status",["succeeded","failed"])

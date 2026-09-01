@@ -26,10 +26,13 @@ class AdsSettings:
 
 @dataclass(frozen=True)
 class AdsScheduledSyncConfig:
-    enabled:bool=False;interval_hours:int=24
+    enabled:bool=False;interval_hours:int=24;stale_run_after_hours:int=6
     @classmethod
     def from_environment(cls):
         enabled=(getenv("AMAZON_ADS_SCHEDULED_SYNC_ENABLED","false").strip().lower()=="true")
         try:interval=int(getenv("AMAZON_ADS_SCHEDULED_SYNC_INTERVAL_HOURS","24"))
         except ValueError:interval=24
-        return cls(enabled,max(1,min(interval,168)))
+        try:stale=int(getenv("AMAZON_ADS_SYNC_STALE_RUN_AFTER_HOURS","6"))
+        except ValueError:stale=6
+        if stale<1 or stale>168:stale=6
+        return cls(enabled,max(1,min(interval,168)),stale)

@@ -42,3 +42,8 @@ class AdsScheduledHistoricalSyncResult:
         for field in ("started_at","completed_at"):
             if result[field] is not None:result[field]=result[field].isoformat()
         return result
+
+@dataclass(frozen=True)
+class AdsScheduledSyncHealth:
+    enabled:bool;status:str;latest_attempt:dict[str,object]|None;last_success_at:str|None;last_failure:dict[str,object]|None;consecutive_failures:int;next_due_at:str|None;overdue:bool;active_run:bool;active_run_stale:bool;readiness_status:str;warnings:tuple[str,...];operator_attention_required:bool
+    def public_dict(self):return asdict(self)

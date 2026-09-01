@@ -8,7 +8,7 @@ from app.database.ads_repository import AdsPerformanceRepository
 from app.services.ads_action_service import AdsActionService, UnknownAdsRecommendationError
 from app.services.ads_execution_plan_service import AdsExecutionPlanService, UnknownAdsExecutionRecommendationError
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
-from app.amazon_ads.config import AdsSettings
+from app.amazon_ads.config import AdsScheduledSyncConfig,AdsSettings
 from app.amazon_ads.auth import AdsLwaAuthenticator
 from app.amazon_ads.client import AmazonAdsClient
 from app.amazon_ads.profiles import AdsProfilesService
@@ -41,6 +41,8 @@ from app.services.ads_live_report_download_validation_service import AdsLiveRepo
 from app.services.ads_live_report_persistence_service import AdsLiveReportPersistenceService
 from app.services.ads_manual_historical_sync_service import AdsManualHistoricalSyncService,HISTORICAL_SYNC_MODE
 from app.services.ads_historical_sync_health_service import AdsHistoricalSyncHealthService
+from app.services.ads_scheduled_sync_health_service import AdsScheduledSyncHealthService
+from app.services.ads_sync_recovery_service import AdsSyncRecoveryService
 
 router = APIRouter(prefix="/api/ads", tags=["ads"])
 
@@ -108,11 +110,15 @@ def _manual_historical_sync_service(repository,context):
     def dependency_factory():
         settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),reporting
     lifecycle=AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5);download=AdsLiveReportDownloadValidationService(lifecycle,reporting,row_limit=100,compressed_limit=1048576,decompressed_limit=5242880);persistence=AdsLiveReportPersistenceService(download,repository,context.seller_id,context.marketplace_id);gate=AdsSyncGateService(readiness.settings,repository,readiness.config,readiness.approval_status)
-    return AdsManualHistoricalSyncService(readiness,gate,repository,persistence,lambda:datetime.now(timezone.utc))
+    now=lambda:datetime.now(timezone.utc);recovery=AdsSyncRecoveryService(repository,AdsScheduledSyncConfig.from_environment().stale_run_after_hours,now)
+    return AdsManualHistoricalSyncService(readiness,gate,repository,persistence,now,recovery)
 
 def _historical_sync_health_service(repository):
     settings=AdsSettings.from_environment();gate=AdsSyncGateService(settings,repository,AdsLiveReadConfig.from_environment())
     return AdsHistoricalSyncHealthService(repository,gate)
+
+def _scheduled_sync_health_service(repository):
+    return AdsScheduledSyncHealthService(AdsScheduledSyncConfig.from_environment(),_production_readiness_service(),repository,lambda:datetime.now(timezone.utc))
 
 def _rule_scope():
     context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
@@ -481,6 +487,12 @@ def historical_sync_health():
         context=_context();repository,_,_=_services();return _historical_sync_health_service(repository).get(context.seller_id,context.marketplace_id).public_dict()
     except Exception:raise HTTPException(503,"Historical Ads sync health is unavailable") from None
 
+@router.get("/scheduled-sync-health")
+def scheduled_sync_health():
+    try:
+        context=_context();repository,_,_=_services();return _scheduled_sync_health_service(repository).get(context.seller_id,context.marketplace_id).public_dict()
+    except Exception:raise HTTPException(503,"Scheduled Ads sync health is unavailable") from None
+
 @router.post("/manual-historical-sync")
 def manual_historical_sync(payload:LiveSmokeTestRequest):
     try:
@@ -489,6 +501,7 @@ def manual_historical_sync(payload:LiveSmokeTestRequest):
         if result.status=="blocked_readiness":raise HTTPException(422,result.message)
         if result.status=="already_running":raise HTTPException(409,result.message)
         if result.status=="cooldown_active":raise HTTPException(429,result.message)
+        if result.status=="unavailable":raise HTTPException(503,result.message)
         return result.public_dict()
     except HTTPException:raise
     except Exception:raise HTTPException(503,"Historical Ads sync is unavailable") from None
