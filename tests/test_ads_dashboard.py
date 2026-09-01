@@ -13,6 +13,7 @@ def test_dashboard_ads_readiness_is_safe(monkeypatch):
     monkeypatch.setattr(routes,"_ads_readiness",lambda context:{"approval_status":"pending","config_status":"incomplete","profile_status":"not_selected","data_status":"no_data","ingestion_run_count":0,"last_ingestion_at":None,"overall_status":"approval_pending"})
     client=TestClient(app);login(client);response=client.get("/dashboard")
     assert response.status_code==200 and "Amazon Ads Readiness" in response.text and "approval_pending" in response.text and "secret" not in response.text.lower()
+    assert "Production live-read readiness unavailable." in response.text and "Run Live Read Smoke Test" not in response.text
 
 def test_dashboard_ads_failure_isolated(monkeypatch):
     configure_admin(monkeypatch)

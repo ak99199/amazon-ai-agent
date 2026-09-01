@@ -50,3 +50,12 @@ document.querySelectorAll(".rule-version-rollback").forEach(button => {
     if(response.ok) window.location.reload(); else if(response.status===409) window.alert("The active rule version changed. Refresh and review before trying again.");
   });
 });
+
+document.querySelectorAll(".ads-live-smoke-test").forEach(button => {
+  button.addEventListener("click", async () => {
+    if (!window.confirm("Run a bounded Amazon Ads read-only smoke test? No campaigns, bids, budgets, keywords, or targeting will be modified.")) return;
+    const panel=button.closest(".ads-live-readiness");
+    const response=await fetch("/api/ads/live-smoke-test",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":panel.dataset.csrf},body:JSON.stringify({confirm_live_read:true})});
+    const result=await response.json();window.alert(response.ok ? result.message : (result.detail||"Live smoke test is unavailable."));
+  });
+});

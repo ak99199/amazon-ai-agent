@@ -266,3 +266,11 @@ The controlled internal flow is: Offline Rule Proposal → Human Proposal Approv
 Rollback follows: Active Version → Explicit Human Rollback → Previous Valid Version from activation history → Recommendation Engine Uses Restored Thresholds. Activation and rollback are atomic, audited, seller/marketplace/profile scoped, and never rewrite threshold snapshots or historical decisions. The resolver is read-only: an active persisted version supplies deterministic recommendation thresholds, while no persisted active version preserves the existing environment/default configuration.
 
 No Amazon Ads entity write occurs in Step 19A.14. Rule activation and rollback change internal recommendation thresholds only; they do not modify campaigns, bids, budgets, keywords, or targeting.
+
+## Step 19A.15A — Production Ads Readiness + Manual Live Read Smoke Test
+
+The production transition is explicitly gated: Approval → Credential Configuration → Region → Explicit Profile Selection → Live-Read Flag with Mock Mode Off → Explicit Manual Smoke Test → Safe Read Result. Approval defaults to pending, profiles are never auto-selected, and every blocked state returns before OAuth or Amazon Ads network dependencies are constructed.
+
+The authenticated, CSRF-protected `POST /api/ads/live-smoke-test` accepts only `confirm_live_read`. When every production gate passes, it refreshes authentication through the existing LwA boundary and performs one bounded, profile-scoped Sponsored Products campaign read. Results contain only safe status, timing, region, presence indicators, stage, safe HTTP status, and bounded record counts; tokens, credentials, headers, and raw remote payloads are never returned or persisted.
+
+Step 19A.15A adds no Amazon Ads write, scheduled sync, autonomous activation, AWS change, or deployment.

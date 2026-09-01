@@ -30,6 +30,8 @@ from app.amazon_ads.rule_activation_models import AdsRuleActivationRequest,AdsRu
 from app.services.ads_rule_activation_service import AdsRuleActivationService
 from app.services.ads_rule_rollback_service import AdsRuleRollbackService
 from app.services.ads_rule_version_view_service import AdsRuleVersionViewService
+from app.services.ads_production_readiness_service import AdsProductionReadinessService
+from app.services.ads_live_smoke_test_service import AdsLiveSmokeTestService
 
 router = APIRouter(prefix="/api/ads", tags=["ads"])
 
@@ -39,6 +41,8 @@ class RuleTuningDecisionRequest(BaseModel):
 class RuleVersionChangeRequest(BaseModel):
     confirm: bool = False
     expected_active_rule_version_id: str | None = None
+class LiveSmokeTestRequest(BaseModel):
+    confirm_live_read: bool = False
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -56,6 +60,14 @@ def _context():
 
 def _action_service(repository):
     return AdsActionService(AdsRecommendationService(repository), repository)
+
+def _production_readiness_service():return AdsProductionReadinessService()
+
+def _live_smoke_test_service():
+    readiness=_production_readiness_service()
+    def adapter_factory():
+        settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return SponsoredProductsReadAdapter(client,max_pages=1,page_size=5)
+    return AdsLiveSmokeTestService(readiness,adapter_factory,max_records=5)
 
 def _rule_scope():
     context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
@@ -123,9 +135,19 @@ def rollback_rule_version(payload:RuleVersionChangeRequest):
 def readiness():
     try:
         context = _context(); _, _, service = _services()
-        return service.get(context.seller_id, context.marketplace_id).public_dict()
+        result=service.get(context.seller_id, context.marketplace_id).public_dict();result["production_live_read"]=_production_readiness_service().get().public_dict();return result
     except (ConfigurationError, Exception):
         raise HTTPException(503, "Ads status is unavailable") from None
+
+@router.post("/live-smoke-test")
+def live_smoke_test(payload:LiveSmokeTestRequest):
+    try:
+        _context();result=_live_smoke_test_service().run(payload.confirm_live_read)
+        if result.status=="blocked_confirmation":raise HTTPException(400,"Explicit live-read confirmation is required")
+        if result.status.startswith("blocked_"):raise HTTPException(422,result.message)
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Amazon Ads live smoke test is unavailable") from None
 
 
 @router.get("/diagnostics")

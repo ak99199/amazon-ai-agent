@@ -1,6 +1,7 @@
 """Normalized safe models for the optional Amazon Ads live-read boundary."""
 from dataclasses import asdict, dataclass
 from decimal import Decimal
+from datetime import datetime
 
 @dataclass(frozen=True)
 class LiveReadStatus:
@@ -34,3 +35,14 @@ class AdsLiveTarget:
 @dataclass(frozen=True)
 class AdsLiveReportStatus:
     report_id: str; status: str; location: str | None = None
+
+@dataclass(frozen=True)
+class AdsProductionReadiness:
+    approval_status:str;live_read_enabled:bool;mock_mode:bool;region:str;profile_id_present:bool;has_client_id:bool;has_client_secret:bool;has_refresh_token:bool;credential_configuration_complete:bool;profile_selected:bool;region_valid:bool;approval_granted:bool;live_read_ready:bool;manual_smoke_test_allowed:bool;blocking_reasons:tuple[str,...];warnings:tuple[str,...]
+    def public_dict(self):return asdict(self)
+
+@dataclass(frozen=True)
+class AdsLiveSmokeTestResult:
+    status:str;started_at:datetime;completed_at:datetime;region:str;profile_id_present:bool;request_stage:str;http_status:int|None;campaign_read_success:bool;records_observed:int;message:str
+    def public_dict(self):
+        value=asdict(self);value["started_at"]=self.started_at.isoformat();value["completed_at"]=self.completed_at.isoformat();return value
