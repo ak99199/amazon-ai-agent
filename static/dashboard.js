@@ -79,3 +79,13 @@ document.querySelectorAll(".ads-live-targeting-validation").forEach(button => {
     if(response.ok) window.alert(`Campaigns ${result.campaigns.records_valid}/${result.campaigns.records_received}; ad groups ${result.ad_groups.records_valid}/${result.ad_groups.records_received}; keywords ${result.keywords.records_valid}/${result.keywords.records_received}; targets ${result.targets.records_valid}/${result.targets.records_received}; relationships ${result.relationships.valid} valid, ${result.relationships.invalid} invalid, ${result.relationships.unresolved} unresolved due to bounded validation.`); else window.alert(result.detail||"Live targeting validation is unavailable.");
   });
 });
+
+document.querySelectorAll(".ads-live-report-lifecycle-validation").forEach(button => {
+  button.addEventListener("click", async () => {
+    if (!window.confirm("Create one bounded, read-only historical Amazon Ads reporting job and validate its lifecycle?")) return;
+    const panel=button.closest(".ads-live-readiness");
+    const response=await fetch("/api/ads/live-report-lifecycle-validation",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":panel.dataset.csrf},body:JSON.stringify({confirm_live_read:true})});
+    const result=await response.json();
+    if(response.ok) window.alert(`Report ${result.report_kind}; ${result.start_date} to ${result.end_date}; creation ${result.creation_attempted ? "yes" : "no"}; polls ${result.poll_attempts}; last status ${result.last_report_status}; terminal ${result.terminal ? "yes" : "no"}; download ready ${result.download_ready ? "yes" : "no"}.`); else window.alert(result.detail||"Historical report lifecycle validation is unavailable.");
+  });
+});

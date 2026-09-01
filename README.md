@@ -290,3 +290,9 @@ The bounded read-only flow is: Production Readiness → Configured Profile Match
 Rows are normalized and validated independently for identifiers, states, match types, finite non-negative bids, and safe target-expression structure. Relationships are valid when a bounded parent is present and consistent, invalid only when known child and parent campaign references contradict, and unresolved when a parent may simply fall outside the bounded page. Missing bounded parents are never labeled as proven orphans.
 
 This step is read-only and non-persistent. It performs no Ads mutation, reporting job, historical ingestion, search-term validation, scheduler, AWS change, or deployment.
+
+## Step 19A.15C.1 — Historical Report Lifecycle Validation
+
+The explicit manual flow is: Production Readiness → Explicit Confirmation → Create One Sponsored Products Campaign Historical Report → Bounded Polling → Terminal Lifecycle Result. The server selects the previous two completed UTC days and permits at most five status checks.
+
+The only POST is creation of a read-only Amazon Ads reporting job; it is not an advertiser mutation. This validation does not download or parse report content, expose signed URLs, persist report jobs or performance rows, create sync runs, schedule work, or modify campaigns, bids, budgets, keywords, or targeting.
