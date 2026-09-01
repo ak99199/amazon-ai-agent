@@ -89,3 +89,13 @@ document.querySelectorAll(".ads-live-report-lifecycle-validation").forEach(butto
     if(response.ok) window.alert(`Report ${result.report_kind}; ${result.start_date} to ${result.end_date}; creation ${result.creation_attempted ? "yes" : "no"}; polls ${result.poll_attempts}; last status ${result.last_report_status}; terminal ${result.terminal ? "yes" : "no"}; download ready ${result.download_ready ? "yes" : "no"}.`); else window.alert(result.detail||"Historical report lifecycle validation is unavailable.");
   });
 });
+
+document.querySelectorAll(".ads-live-report-download-validation").forEach(button => {
+  button.addEventListener("click", async () => {
+    if (!window.confirm("Create and download one bounded, read-only historical Amazon Ads report for structural validation?")) return;
+    const panel=button.closest(".ads-live-readiness");
+    const response=await fetch("/api/ads/live-report-download-validation",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":panel.dataset.csrf},body:JSON.stringify({confirm_live_read:true})});
+    const result=await response.json();
+    if(response.ok) window.alert(`Lifecycle ${result.last_report_status}; download ${result.download_succeeded ? "successful" : "not completed"}; decompression ${result.decompression_succeeded ? "successful" : "not completed"}; parsing ${result.parse_succeeded ? "successful" : "not completed"}; rows observed ${result.rows_observed}, valid ${result.rows_valid}, invalid ${result.rows_invalid}; truncated ${result.rows_truncated ? "yes" : "no"}.`); else window.alert(result.detail||"Historical report download validation is unavailable.");
+  });
+});

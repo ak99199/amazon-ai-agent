@@ -5,6 +5,7 @@ from app.amazon_ads.models import AdsApiErrorResponse
 class AdsApiClientError(Exception):
     def __init__(self,status_code,message,retryable=False):super().__init__(message);self.status_code=status_code;self.retryable=retryable
     def public_error(self):return AdsApiErrorResponse(self.status_code,str(self),self.retryable)
+class AdsDownloadLimitError(AdsApiClientError):pass
 class AmazonAdsClient:
     def __init__(self,settings,authenticator,session=None,max_attempts=3,timeout=30):self._settings=settings;self._authenticator=authenticator;self._session=session or requests.Session();self._max_attempts=max(1,max_attempts);self._timeout=timeout
     def headers(self,profile_id=None):
@@ -17,6 +18,21 @@ class AmazonAdsClient:
     def post_read_only(self,path,json=None,params=None,profile_id=None):
         """For read/report creation operations only; campaign mutation methods are absent."""
         return self._request("post",path,params=params,json=json,profile_id=profile_id)
+    def download_signed(self,url,max_bytes):
+        """Download a signed report location without Ads authorization headers."""
+        try:response=self._session.get(url,timeout=self._timeout,stream=True)
+        except requests.Timeout as error:raise AdsApiClientError(None,"Amazon Ads report download timed out",True) from error
+        except requests.RequestException as error:raise AdsApiClientError(None,"Amazon Ads report download failed",True) from error
+        if not response.ok:raise self._normalize_error(response.status_code)
+        declared=response.headers.get("Content-Length")
+        try:declared_size=int(declared) if declared else None
+        except (TypeError,ValueError):declared_size=None
+        if declared_size is not None and declared_size>max_bytes:raise AdsDownloadLimitError(None,"Amazon Ads report download exceeded the safety limit")
+        content=bytearray()
+        for chunk in response.iter_content(65536):
+            content.extend(chunk)
+            if len(content)>max_bytes:raise AdsDownloadLimitError(None,"Amazon Ads report download exceeded the safety limit")
+        return bytes(content)
     def _request(self,method,path,params=None,json=None,profile_id=None):
         url=f"{self._settings.require_auth().base_url}/{path.lstrip('/')}";headers=self.headers(profile_id);last_error=None
         for attempt in range(self._max_attempts):

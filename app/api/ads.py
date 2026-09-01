@@ -37,6 +37,7 @@ from app.services.ads_live_targeting_validation_service import AdsLiveTargetingV
 from app.amazon_ads.report_transport import AdsReportTransport
 from app.amazon_ads.reporting import SponsoredProductsReportingService
 from app.services.ads_live_report_lifecycle_validation_service import AdsLiveReportLifecycleValidationService
+from app.services.ads_live_report_download_validation_service import AdsLiveReportDownloadValidationService
 
 router = APIRouter(prefix="/api/ads", tags=["ads"])
 
@@ -91,6 +92,13 @@ def _live_report_lifecycle_validation_service():
     def dependency_factory():
         settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),SponsoredProductsReportingService()
     return AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5)
+
+def _live_report_download_validation_service():
+    readiness=_production_readiness_service();reporting=SponsoredProductsReportingService()
+    def dependency_factory():
+        settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),reporting
+    lifecycle=AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5)
+    return AdsLiveReportDownloadValidationService(lifecycle,reporting,row_limit=100,compressed_limit=1048576,decompressed_limit=5242880)
 
 def _rule_scope():
     context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
@@ -201,6 +209,16 @@ def live_report_lifecycle_validation(payload:LiveSmokeTestRequest):
         return result.public_dict()
     except HTTPException:raise
     except Exception:raise HTTPException(503,"Amazon Ads historical report lifecycle validation is unavailable") from None
+
+@router.post("/live-report-download-validation")
+def live_report_download_validation(payload:LiveSmokeTestRequest):
+    try:
+        _context();result=_live_report_download_validation_service().run(payload.confirm_live_read)
+        if result.status=="blocked_confirmation":raise HTTPException(400,"Explicit live-read confirmation is required")
+        if result.status.startswith("blocked_"):raise HTTPException(422,"Amazon Ads historical report download validation is blocked")
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Amazon Ads historical report download validation is unavailable") from None
 
 
 @router.get("/diagnostics")

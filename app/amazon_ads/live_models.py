@@ -64,3 +64,9 @@ class AdsLiveReportLifecycleValidationResult:
     status:str;started_at:datetime;completed_at:datetime;readiness_status:str;report_kind:str;start_date:str;end_date:str;creation_attempted:bool;report_id_present:bool;poll_attempts:int;last_report_status:str;terminal:bool;download_ready:bool;warnings:tuple[str,...];blocking_reasons:tuple[str,...];message:str
     def public_dict(self):
         value=asdict(self);value["started_at"]=self.started_at.isoformat();value["completed_at"]=self.completed_at.isoformat();return value
+
+@dataclass(frozen=True)
+class AdsLiveReportDownloadValidationResult:
+    status:str;started_at:datetime;completed_at:datetime;readiness_status:str;report_kind:str;start_date:str;end_date:str;report_created:bool;poll_attempts:int;last_report_status:str;download_attempted:bool;download_succeeded:bool;compressed_size_known:bool;decompression_succeeded:bool;parse_succeeded:bool;rows_observed:int;rows_validated:int;rows_valid:int;rows_invalid:int;rows_truncated:bool;warnings:tuple[str,...];blocking_reasons:tuple[str,...];message:str
+    def public_dict(self):
+        value=asdict(self);value["started_at"]=self.started_at.isoformat();value["completed_at"]=self.completed_at.isoformat();return value

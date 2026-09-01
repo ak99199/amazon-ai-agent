@@ -8,6 +8,8 @@ class AdsLiveReportLifecycleValidationService:
  def __init__(self,readiness_service,dependency_factory,now=None,max_polls=5,sleeper=None):
   self.readiness_service=readiness_service;self.dependency_factory=dependency_factory;self.now=now or (lambda:datetime.now(timezone.utc));self.max_polls=max(1,min(int(max_polls),5));self.sleeper=sleeper or (lambda _:None)
  def run(self,confirm_live_read=False):
+  return self.run_with_completed(confirm_live_read)
+ def run_with_completed(self,confirm_live_read=False,on_completed=None):
   started=self.now();ready=self.readiness_service.get();end=started.date()-timedelta(days=1);start=end-timedelta(days=1)
   if confirm_live_read is not True:return self._result("blocked_confirmation",started,ready,start,end,False,False,0,"not_started",False,False,"Explicit live-read confirmation is required.")
   if not ready.manual_smoke_test_allowed:return self._result("blocked_readiness",started,ready,start,end,False,False,0,"not_started",False,False,"Historical report lifecycle validation is blocked.")
@@ -21,10 +23,12 @@ class AdsLiveReportLifecycleValidationService:
   if not report_id:return self._result("validation_error",started,ready,start,end,True,False,0,"not_started",False,False,"Amazon Ads did not return a valid report identifier.")
   last="pending"
   for attempt in range(1,self.max_polls+1):
-   try:last=transport.status(str(self.readiness_service.settings.profile_id),report_id).status
+   try:report_status=transport.status(str(self.readiness_service.settings.profile_id),report_id);last=report_status.status
    except AdsApiClientError as error:return self._error(error,started,ready,start,end,True,attempt,True)
    except Exception:return self._result("remote_error",started,ready,start,end,True,True,attempt,last,False,False,"Historical report status lookup failed.")
-   if last=="completed":return self._result("success",started,ready,start,end,True,True,attempt,last,True,True,"Historical report lifecycle completed; content was not downloaded.")
+   if last=="completed":
+    if on_completed:return on_completed(transport,str(self.readiness_service.settings.profile_id),report_id,report_status,started,ready,start,end,attempt)
+    return self._result("success",started,ready,start,end,True,True,attempt,last,True,True,"Historical report lifecycle completed; content was not downloaded.")
    if last in ("failed","cancelled"):return self._result("report_failed",started,ready,start,end,True,True,attempt,last,True,False,"Historical report reached a terminal failure state.")
    if last=="unknown":return self._result("validation_error",started,ready,start,end,True,True,attempt,last,True,False,"Amazon Ads returned an unknown report status.")
    if attempt<self.max_polls:self.sleeper(0)

@@ -296,3 +296,11 @@ This step is read-only and non-persistent. It performs no Ads mutation, reportin
 The explicit manual flow is: Production Readiness → Explicit Confirmation → Create One Sponsored Products Campaign Historical Report → Bounded Polling → Terminal Lifecycle Result. The server selects the previous two completed UTC days and permits at most five status checks.
 
 The only POST is creation of a read-only Amazon Ads reporting job; it is not an advertiser mutation. This validation does not download or parse report content, expose signed URLs, persist report jobs or performance rows, create sync runs, schedule work, or modify campaigns, bids, budgets, keywords, or targeting.
+
+## Step 19A.15C.2 — Historical Report Download Validation
+
+The bounded manual flow extends the same lifecycle: Readiness → Confirmation → Create One Report → Poll → Download Once → GZIP Decode → JSON Parse → Validate at Most 100 Rows → Safe Summary. The signed download is limited to 1 MiB compressed and 5 MiB decompressed; oversized or malformed content is rejected in memory.
+
+Campaign DAILY rows require the requested date, campaign ID, and numeric metric columns. Metrics must be finite and non-negative, count metrics must be integral, dates must fall within the requested two-day window, and duplicate report grain is evaluated as date plus campaign ID. Malformed rows are isolated, and reports beyond 100 rows are safely marked truncated.
+
+This validation performs no persistence, sync-run creation, scheduling, recommendation side effects, advertiser mutations, AWS changes, or deployment. Signed locations, raw bytes, parsed rows, and credentials are never returned.
