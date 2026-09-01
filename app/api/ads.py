@@ -33,6 +33,7 @@ from app.services.ads_rule_version_view_service import AdsRuleVersionViewService
 from app.services.ads_production_readiness_service import AdsProductionReadinessService
 from app.services.ads_live_smoke_test_service import AdsLiveSmokeTestService
 from app.services.ads_live_entity_validation_service import AdsLiveEntityValidationService
+from app.services.ads_live_targeting_validation_service import AdsLiveTargetingValidationService
 
 router = APIRouter(prefix="/api/ads", tags=["ads"])
 
@@ -75,6 +76,12 @@ def _live_entity_validation_service():
     def dependency_factory():
         settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsProfilesService(client),SponsoredProductsReadAdapter(client,max_pages=1,page_size=10)
     return AdsLiveEntityValidationService(readiness,dependency_factory,max_campaigns=10)
+
+def _live_targeting_validation_service():
+    readiness=_production_readiness_service()
+    def dependency_factory():
+        settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsProfilesService(client),SponsoredProductsReadAdapter(client,max_pages=1,page_size=25)
+    return AdsLiveTargetingValidationService(readiness,dependency_factory)
 
 def _rule_scope():
     context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
@@ -165,6 +172,16 @@ def live_entity_validation(payload:LiveSmokeTestRequest):
         return result.public_dict()
     except HTTPException:raise
     except Exception:raise HTTPException(503,"Amazon Ads live entity validation is unavailable") from None
+
+@router.post("/live-targeting-validation")
+def live_targeting_validation(payload:LiveSmokeTestRequest):
+    try:
+        _context();result=_live_targeting_validation_service().run(payload.confirm_live_read)
+        if result.status=="blocked_confirmation":raise HTTPException(400,"Explicit live-read confirmation is required")
+        if result.status.startswith("blocked_"):raise HTTPException(422,"Amazon Ads live targeting validation is blocked")
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Amazon Ads live targeting validation is unavailable") from None
 
 
 @router.get("/diagnostics")

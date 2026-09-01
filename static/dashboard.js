@@ -69,3 +69,13 @@ document.querySelectorAll(".ads-live-entity-validation").forEach(button => {
     if(response.ok) window.alert(`Profile: ${result.profile.matched ? "Matched" : "Not Found"}. Campaigns — received ${result.campaigns.records_received}, valid ${result.campaigns.records_valid}, invalid ${result.campaigns.records_invalid}, duplicates ${result.campaigns.duplicate_count}.`); else window.alert(result.detail||"Live entity validation is unavailable.");
   });
 });
+
+document.querySelectorAll(".ads-live-targeting-validation").forEach(button => {
+  button.addEventListener("click", async () => {
+    if (!window.confirm("Run bounded, read-only campaign, ad group, keyword, target, and relationship validation?")) return;
+    const panel=button.closest(".ads-live-readiness");
+    const response=await fetch("/api/ads/live-targeting-validation",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":panel.dataset.csrf},body:JSON.stringify({confirm_live_read:true})});
+    const result=await response.json();
+    if(response.ok) window.alert(`Campaigns ${result.campaigns.records_valid}/${result.campaigns.records_received}; ad groups ${result.ad_groups.records_valid}/${result.ad_groups.records_received}; keywords ${result.keywords.records_valid}/${result.keywords.records_received}; targets ${result.targets.records_valid}/${result.targets.records_received}; relationships ${result.relationships.valid} valid, ${result.relationships.invalid} invalid, ${result.relationships.unresolved} unresolved due to bounded validation.`); else window.alert(result.detail||"Live targeting validation is unavailable.");
+  });
+});

@@ -282,3 +282,11 @@ The explicit validation flow is: Production Readiness → Manual Confirmation �
 Campaign validation requests one page of at most ten records, reuses existing profile-scoped GET and campaign normalization boundaries, and reports only safe profile metadata plus received, valid, invalid, and duplicate counts. Malformed rows are isolated and raw Amazon payloads are never returned or persisted.
 
 This step is read-only. It adds no campaign mutation, keyword or target read, report API call, ingestion, scheduler, AWS change, or deployment.
+
+## Step 19A.15B.2 — Keyword + Target + Relationship Live Validation
+
+The bounded read-only flow is: Production Readiness → Configured Profile Match → Campaign → Ad Group → Keyword / Target → Relationship Validation → Safe Diagnostic Summary. Each entity uses one profile-scoped GET with limits of 10 campaigns, 20 ad groups, 25 keywords, and 25 targets.
+
+Rows are normalized and validated independently for identifiers, states, match types, finite non-negative bids, and safe target-expression structure. Relationships are valid when a bounded parent is present and consistent, invalid only when known child and parent campaign references contradict, and unresolved when a parent may simply fall outside the bounded page. Missing bounded parents are never labeled as proven orphans.
+
+This step is read-only and non-persistent. It performs no Ads mutation, reporting job, historical ingestion, search-term validation, scheduler, AWS change, or deployment.

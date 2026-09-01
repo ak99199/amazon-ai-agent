@@ -52,3 +52,9 @@ class AdsLiveEntityValidationResult:
     status:str;started_at:datetime;completed_at:datetime;readiness_status:str;profile:dict;campaigns:dict;warnings:tuple[str,...];blocking_reasons:tuple[str,...]
     def public_dict(self):
         value=asdict(self);value["started_at"]=self.started_at.isoformat();value["completed_at"]=self.completed_at.isoformat();return value
+
+@dataclass(frozen=True)
+class AdsLiveTargetingValidationResult:
+    status:str;started_at:datetime;completed_at:datetime;readiness_status:str;profile_summary:dict;campaigns:dict;ad_groups:dict;keywords:dict;targets:dict;relationships:dict;warnings:tuple[str,...];blocking_reasons:tuple[str,...]
+    def public_dict(self):
+        value=asdict(self);value["started_at"]=self.started_at.isoformat();value["completed_at"]=self.completed_at.isoformat();return value
