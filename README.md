@@ -384,4 +384,10 @@ A prepared write intent undergoes authoritative revalidation and either remains 
 
 Amazon Ads approval remains pending, no live current-value provider exists, and no advertiser mutation is sent. Clients cannot edit numeric, action, direction, or scope values.
 
+## Step 19A.17E — Trusted Advertiser Target Resolution
+
+The safe flow is: prepared write intent → authoritative lifecycle revalidation → trusted advertiser entity resolution → **STOP**. Only unambiguous keyword-scope `BID_DIRECTION_REVIEW` intents may resolve to metadata for `SP_KEYWORD_BID`.
+
+Amazon Ads approval remains pending, no live target resolver or mutation transport exists, and no Amazon Ads change is sent. Campaign-level bid reviews are never reinterpreted as keyword bids, campaign budgets, ad-group defaults, or placement adjustments; clients cannot provide scope, entity, action, direction, or numeric values.
+
 Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.

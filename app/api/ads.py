@@ -12,6 +12,7 @@ from app.amazon_ads.write_models import AdsWriteConfig
 from app.services.ads_exact_value_proposal_service import AdsExactValueProposalService
 from app.services.ads_write_intent_service import AdsWriteIntentService
 from app.services.ads_write_intent_revalidation_service import AdsWriteIntentRevalidationService
+from app.services.ads_write_target_resolution_service import AdsWriteTargetResolutionService
 from app.amazon_ads.write_intent_models import AdsWriteIntentBlockedError
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
 from app.amazon_ads.config import AdsScheduledSyncConfig,AdsSettings
@@ -70,6 +71,8 @@ class WriteIntentRevalidationRequest(BaseModel):
     confirm_revalidation: bool = False
 class WriteIntentCancelRequest(BaseModel):
     confirm_cancel_write_intent: bool = False
+class WriteTargetResolutionRequest(BaseModel):
+    confirm_target_resolution: bool = False
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -525,6 +528,23 @@ def cancel_write_intent(write_intent_id:str,payload:WriteIntentCancelRequest):
         return result.public_dict()
     except HTTPException:raise
     except Exception:raise HTTPException(503,"Write-intent cancellation is unavailable") from None
+
+@router.post("/write-intents/{write_intent_id}/target-resolution")
+def resolve_write_target(write_intent_id:str,payload:WriteTargetResolutionRequest):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:raise HTTPException(503,"Advertiser target resolution is unavailable")
+        repository,_,_=_services();recommendations=AdsRecommendationService(repository)
+        lifecycle=AdsWriteIntentRevalidationService(recommendations,repository,
+            write_config=AdsWriteConfig.from_environment(),approval_status=os.getenv("AMAZON_ADS_APPROVAL_STATUS","pending"))
+        # No production target resolver or live Amazon provider exists in this step.
+        result=AdsWriteTargetResolutionService(repository,lifecycle).resolve(
+            context.seller_id,context.marketplace_id,profile_id,write_intent_id,payload.confirm_target_resolution)
+        if result.status=="confirmation_required":raise HTTPException(400,"Explicit target-resolution confirmation is required")
+        if result.status=="intent_not_found":raise HTTPException(404,"Write intent is not available")
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Advertiser target resolution is unavailable") from None
 
 
 def _live_read_service():
