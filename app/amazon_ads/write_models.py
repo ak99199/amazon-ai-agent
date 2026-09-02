@@ -21,10 +21,10 @@ class AdsWriteConfig:
 
 @dataclass(frozen=True)
 class AdsWritePreflight:
-    preflight_id:str;execution_plan_id:str;recommendation_id:str|None;decision_id:str|None;seller_id:str;marketplace_id:str;profile_id:str;scope_type:str|None;scope_id:str|None;recommendation_code:str|None;action_type:str|None;direction:str|None;status:str;eligible:bool;dry_run:bool;safety_checks:tuple[dict[str,object],...];created_at:datetime
+    preflight_id:str;execution_plan_id:str;recommendation_id:str|None;decision_id:str|None;seller_id:str;marketplace_id:str;profile_id:str;scope_type:str|None;scope_id:str|None;recommendation_code:str|None;action_type:str|None;direction:str|None;status:str;eligible:bool;dry_run:bool;safety_checks:tuple[dict[str,object],...];created_at:datetime;proposal_id:str|None=None;current_value:str|None=None;proposed_value:str|None=None
     @classmethod
-    def create(cls,plan_id,seller,marketplace,profile,status,eligible,checks,created_at,plan=None):
+    def create(cls,plan_id,seller,marketplace,profile,status,eligible,checks,created_at,plan=None,proposal=None):
         basis="|".join((seller,marketplace,str(profile),plan_id,status,str(getattr(plan,"decision_id",None)),str(getattr(plan,"action_type",None)),str(getattr(plan,"direction",None)),str(getattr(plan,"current_value",None)),str(getattr(plan,"proposed_value",None))));identifier=hashlib.sha256(basis.encode()).hexdigest()[:24]
-        return cls(identifier,plan_id,getattr(plan,"recommendation_id",None),getattr(plan,"decision_id",None),seller,marketplace,str(profile),getattr(plan,"scope_type",None),getattr(plan,"scope_id",None),getattr(plan,"recommendation_code",None),getattr(plan,"action_type",None),getattr(plan,"direction",None),status,eligible,True,tuple(checks),created_at)
+        return cls(identifier,plan_id,getattr(plan,"recommendation_id",None),getattr(plan,"decision_id",None),seller,marketplace,str(profile),getattr(plan,"scope_type",None),getattr(plan,"scope_id",None),getattr(plan,"recommendation_code",None),getattr(plan,"action_type",None),getattr(plan,"direction",None),status,eligible,True,tuple(checks),created_at,getattr(proposal,"proposal_id",None),getattr(proposal,"current_value",None),getattr(proposal,"proposed_value",None))
     def public_dict(self):
         result=asdict(self);result["created_at"]=self.created_at.isoformat();result["safety_checks"]=list(self.safety_checks);return result

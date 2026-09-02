@@ -6,6 +6,7 @@ import uuid
 
 from app.amazon_ads.action_models import AdsRecommendationDecision
 from app.amazon_ads.execution_models import AdsExecutionPlan
+from app.amazon_ads.write_intent_models import AdsWriteIntent
 from app.amazon_ads.sync_models import AdsManualSyncResult
 from app.amazon_ads.rule_tuning_models import validate_threshold_snapshot
 import json
@@ -38,6 +39,10 @@ CREATE TABLE IF NOT EXISTS ads_rule_tuning_proposals (proposal_id TEXT PRIMARY K
 CREATE TABLE IF NOT EXISTS ads_rule_activation_events (event_id TEXT PRIMARY KEY,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL CHECK(event_type IN ('RULE_VERSION_ACTIVATED','RULE_VERSION_ROLLED_BACK')),from_rule_version_id TEXT,to_rule_version_id TEXT,source_proposal_id TEXT,created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_ads_rule_activation_events_scope_created ON ads_rule_activation_events(seller_id,marketplace_id,profile_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS ads_rule_tuning_events (event_id TEXT PRIMARY KEY,proposal_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ads_write_intents (write_intent_id TEXT PRIMARY KEY,idempotency_key TEXT NOT NULL UNIQUE,execution_plan_id TEXT NOT NULL,recommendation_id TEXT NOT NULL,decision_id TEXT NOT NULL,proposal_id TEXT NOT NULL,preflight_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,scope_type TEXT NOT NULL,scope_id TEXT NOT NULL,recommendation_code TEXT NOT NULL,action_type TEXT NOT NULL,direction TEXT NOT NULL,current_value TEXT NOT NULL,proposed_value TEXT NOT NULL,currency TEXT,status TEXT NOT NULL CHECK(status IN ('prepared','superseded','cancelled')),created_at TEXT NOT NULL,source TEXT NOT NULL,schema_version INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ads_write_intents_scope_created ON ads_write_intents(seller_id,marketplace_id,profile_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS ads_write_intent_events (event_id TEXT PRIMARY KEY,write_intent_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,old_status TEXT,new_status TEXT NOT NULL CHECK(new_status IN ('prepared','superseded','cancelled')),event_type TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ads_write_intent_events_scope_created ON ads_write_intent_events(seller_id,marketplace_id,profile_id,created_at DESC);
 """
 
 
@@ -197,6 +202,23 @@ class AdsPerformanceRepository:
     def list_execution_events(self,seller_id,marketplace_id,profile_id,execution_plan_id):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_execution_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND execution_plan_id=? ORDER BY created_at",(seller_id,marketplace_id,str(profile_id),execution_plan_id)).fetchall()
+    def save_write_intent(self,intent):
+        self.initialize()
+        values=(intent.write_intent_id,intent.idempotency_key,intent.execution_plan_id,intent.recommendation_id,intent.decision_id,intent.proposal_id,intent.preflight_id,intent.seller_id,intent.marketplace_id,intent.profile_id,intent.scope_type,intent.scope_id,intent.recommendation_code,intent.action_type,intent.direction,intent.current_value,intent.proposed_value,intent.currency,intent.status,intent.created_at.isoformat(),intent.source,intent.schema_version)
+        event_id=f"{intent.write_intent_id}:prepared"
+        with get_connection(self._database_path) as connection:
+            connection.execute("INSERT OR IGNORE INTO ads_write_intents(write_intent_id,idempotency_key,execution_plan_id,recommendation_id,decision_id,proposal_id,preflight_id,seller_id,marketplace_id,profile_id,scope_type,scope_id,recommendation_code,action_type,direction,current_value,proposed_value,currency,status,created_at,source,schema_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",values)
+            connection.execute("INSERT OR IGNORE INTO ads_write_intent_events(event_id,write_intent_id,seller_id,marketplace_id,profile_id,old_status,new_status,event_type,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(event_id,intent.write_intent_id,intent.seller_id,intent.marketplace_id,intent.profile_id,None,"prepared","WRITE_INTENT_PREPARED",intent.created_at.isoformat()))
+            row=connection.execute("SELECT * FROM ads_write_intents WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND idempotency_key=?",(intent.seller_id,intent.marketplace_id,intent.profile_id,intent.idempotency_key)).fetchone()
+        return self._write_intent(row)
+    def list_write_intents(self,seller_id,marketplace_id,profile_id,status=None,limit=50):
+        self.initialize();clauses=["seller_id=?","marketplace_id=?","profile_id=?"];values=[seller_id,marketplace_id,str(profile_id)]
+        if status is not None:clauses.append("status=?");values.append(status)
+        with get_connection(self._database_path) as connection:rows=connection.execute(f"SELECT * FROM ads_write_intents WHERE {' AND '.join(clauses)} ORDER BY created_at DESC,write_intent_id LIMIT ?",(*values,max(1,min(limit,200)))).fetchall()
+        return [self._write_intent(row) for row in rows]
+    def list_write_intent_events(self,seller_id,marketplace_id,profile_id,write_intent_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_write_intent_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND write_intent_id=? ORDER BY created_at,event_id",(seller_id,marketplace_id,str(profile_id),write_intent_id)).fetchall()
     def save_sync_run(self,run):
         self.initialize();values=(run.sync_id,run.seller_id,run.marketplace_id,run.profile_id,run.mode,run.start_date.isoformat(),run.end_date.isoformat(),run.started_at.isoformat(),run.finished_at.isoformat() if run.finished_at else None,run.status,int(run.success),run.campaigns_fetched,run.ad_groups_fetched,run.keywords_fetched,run.targets_fetched,run.report_rows_received,run.rows_normalized,run.rows_saved,run.rows_failed,run.error_code,run.safe_error_message,run.started_at.isoformat(),run.trigger_source)
         with get_connection(self._database_path) as connection:connection.execute("INSERT INTO ads_sync_runs(sync_id,seller_id,marketplace_id,profile_id,mode,start_date,end_date,started_at,finished_at,status,success,campaigns_fetched,ad_groups_fetched,keywords_fetched,targets_fetched,report_rows_received,rows_normalized,rows_saved,rows_failed,error_code,error_summary,created_at,trigger_source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET finished_at=excluded.finished_at,status=excluded.status,success=excluded.success,campaigns_fetched=excluded.campaigns_fetched,ad_groups_fetched=excluded.ad_groups_fetched,keywords_fetched=excluded.keywords_fetched,targets_fetched=excluded.targets_fetched,report_rows_received=excluded.report_rows_received,rows_normalized=excluded.rows_normalized,rows_saved=excluded.rows_saved,rows_failed=excluded.rows_failed,error_code=excluded.error_code,error_summary=excluded.error_summary,trigger_source=excluded.trigger_source",values)
@@ -394,6 +416,9 @@ class AdsPerformanceRepository:
     def _execution_plan(item):
         checks=tuple(json.loads(item["safety_checks"]))
         return AdsExecutionPlan(item["recommendation_id"],item["decision_id"],item["seller_id"],item["marketplace_id"],item["profile_id"],item["scope_type"],item["scope_id"],item["recommendation_code"],item["action_type"],item["direction"],None,None,True,bool(item["eligible"]),item["status"],item["eligibility_code"],item["eligibility_reason"],checks,datetime.fromisoformat(item["created_at"]),item["execution_plan_id"])
+    @staticmethod
+    def _write_intent(item):
+        return AdsWriteIntent(item["write_intent_id"],item["idempotency_key"],item["execution_plan_id"],item["recommendation_id"],item["decision_id"],item["proposal_id"],item["preflight_id"],item["seller_id"],item["marketplace_id"],item["profile_id"],item["scope_type"],item["scope_id"],item["recommendation_code"],item["action_type"],item["direction"],item["current_value"],item["proposed_value"],item["currency"],item["status"],datetime.fromisoformat(item["created_at"]),item["source"],item["schema_version"])
     @staticmethod
     def _decision(item):
         return AdsRecommendationDecision(item["recommendation_id"],item["seller_id"],item["marketplace_id"],item["profile_id"],item["scope_type"],item["scope_id"],item["recommendation_code"],item["recommendation_title"],item["status"],item["review_note"],item["review_source"],item["decision_id"],datetime.fromisoformat(item["created_at"]),datetime.fromisoformat(item["updated_at"]),datetime.fromisoformat(item["reviewed_at"]) if item["reviewed_at"] else None,json.loads(item["recommendation_snapshot_json"]) if "recommendation_snapshot_json" in item.keys() and item["recommendation_snapshot_json"] else None)

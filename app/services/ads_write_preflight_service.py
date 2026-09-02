@@ -34,10 +34,10 @@ class AdsWritePreflightService:
   supported=plan.action_type in SUPPORTED_ACTIONS and ACTION_CODES.get(plan.recommendation_code)==plan.action_type
   if not add("SUPPORTED_ACTION",supported,"Action is in the controlled future-write allowlist."):return self._result(execution_plan_id,seller,marketplace,profile,"unsupported_action",False,checks,plan)
   exact=bool(proposal and proposal.eligible and proposal.proposal_status=="eligible_proposal" and proposal.execution_plan_id==execution_plan_id and proposal.recommendation_id==plan.recommendation_id and proposal.decision_id==plan.decision_id and proposal.seller_id==seller and proposal.marketplace_id==marketplace and proposal.profile_id==profile and proposal.action_type==plan.action_type and proposal.direction==plan.direction and proposal.current_value is not None and proposal.proposed_value is not None)
-  if not add("EXACT_VALUE_AVAILABLE",exact,"Validated exact current and proposed values are present."):return self._result(execution_plan_id,seller,marketplace,profile,"exact_value_required",False,checks,plan)
+  if not add("EXACT_VALUE_AVAILABLE",exact,"Validated exact current and proposed values are present."):return self._result(execution_plan_id,seller,marketplace,profile,"exact_value_required",False,checks,plan,proposal)
   hard=self._hard_limits(proposal)
-  if not add("HARD_LIMITS",hard,"Exact values remain within configured hard limits."):return self._result(execution_plan_id,seller,marketplace,profile,"hard_limit_violation",False,checks,plan)
-  return self._result(execution_plan_id,seller,marketplace,profile,"eligible_preflight",True,checks,plan)
+  if not add("HARD_LIMITS",hard,"Exact values remain within configured hard limits."):return self._result(execution_plan_id,seller,marketplace,profile,"hard_limit_violation",False,checks,plan,proposal)
+  return self._result(execution_plan_id,seller,marketplace,profile,"eligible_preflight",True,checks,plan,proposal)
  def _hard_limits(self,plan):
   if plan.action_type!="BID_DIRECTION_REVIEW":return True
   try:
@@ -46,4 +46,4 @@ class AdsWritePreflightService:
    maximum=self.safety.config.max_bid_increase_percent if plan.direction=="increase" else self.safety.config.max_bid_decrease_percent
    return self.safety.percentage_within_limit(current,proposed,maximum) and self.safety.config.max_single_action_amount>0 and proposed<=self.safety.config.max_single_action_amount and self.safety.config.max_actions_per_run>=1
   except (InvalidOperation,ValueError,TypeError):return False
- def _result(self,plan_id,seller,marketplace,profile,status,eligible,checks,plan):return AdsWritePreflight.create(plan_id,seller,marketplace,profile,status,eligible,checks,self.now(),plan)
+ def _result(self,plan_id,seller,marketplace,profile,status,eligible,checks,plan,proposal=None):return AdsWritePreflight.create(plan_id,seller,marketplace,profile,status,eligible,checks,self.now(),plan,proposal)

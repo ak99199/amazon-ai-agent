@@ -10,6 +10,8 @@ from app.services.ads_execution_plan_service import AdsExecutionPlanService, Unk
 from app.services.ads_write_preflight_service import AdsWritePreflightService
 from app.amazon_ads.write_models import AdsWriteConfig
 from app.services.ads_exact_value_proposal_service import AdsExactValueProposalService
+from app.services.ads_write_intent_service import AdsWriteIntentService
+from app.amazon_ads.write_intent_models import AdsWriteIntentBlockedError
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
 from app.amazon_ads.config import AdsScheduledSyncConfig,AdsSettings
 from app.amazon_ads.auth import AdsLwaAuthenticator
@@ -61,6 +63,8 @@ class WritePreflightRequest(BaseModel):
     confirm_controlled_write_preflight: bool = False
 class ExactValueProposalRequest(BaseModel):
     confirm_exact_value_proposal: bool = False
+class WriteIntentRequest(BaseModel):
+    confirm_prepare_write_intent: bool = False
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -449,6 +453,44 @@ def exact_value_proposal(execution_plan_id:str,payload:ExactValueProposalRequest
         return result.public_dict()
     except HTTPException:raise
     except Exception:raise HTTPException(503,"Exact-value proposal is unavailable") from None
+
+@router.post("/execution-plans/{execution_plan_id}/write-intent")
+def prepare_write_intent(execution_plan_id:str,payload:WriteIntentRequest):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:raise HTTPException(503,"Write-intent preparation is unavailable")
+        if payload.confirm_prepare_write_intent is not True:raise HTTPException(400,"Explicit write-intent confirmation is required")
+        repository,_,_=_services()
+        recommendations=AdsRecommendationService(repository)
+        proposal=AdsExactValueProposalService(recommendations,repository).propose(
+            context.seller_id,context.marketplace_id,profile_id,execution_plan_id,True)
+        preflight=AdsWritePreflightService(recommendations,repository,
+            AdsWriteConfig.from_environment(),os.getenv("AMAZON_ADS_APPROVAL_STATUS","pending")).preflight(
+                context.seller_id,context.marketplace_id,profile_id,execution_plan_id,True,proposal=proposal)
+        service=AdsWriteIntentService(AdsRecommendationService(repository),repository,
+            AdsWriteConfig.from_environment(),os.getenv("AMAZON_ADS_APPROVAL_STATUS","pending"))
+        intent=service.prepare(context.seller_id,context.marketplace_id,profile_id,
+            execution_plan_id,payload.confirm_prepare_write_intent,proposal,preflight)
+        return intent.public_dict()
+    except AdsWriteIntentBlockedError as error:
+        if error.status=="confirmation_required":raise HTTPException(400,"Explicit write-intent confirmation is required") from None
+        if error.status=="plan_not_found":raise HTTPException(404,"Execution plan is not available") from None
+        return {"status":error.status,"prepared":False,"message":"No Amazon Ads change has been sent."}
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Write-intent preparation is unavailable") from None
+
+@router.get("/write-intents")
+def write_intents(status:str|None=Query(None),limit:int=Query(50,ge=1,le=200)):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:return {"write_intents":[],"count":0}
+        repository,_,_=_services()
+        records=AdsWriteIntentService(AdsRecommendationService(repository),repository).list_intents(
+            context.seller_id,context.marketplace_id,profile_id,status,limit)
+        return {"write_intents":[record.public_dict() for record in records],"count":len(records),
+                "message":"Prepared only — no Amazon Ads change has been sent."}
+    except ValueError:raise HTTPException(422,"Unsupported write-intent status") from None
+    except Exception:raise HTTPException(503,"Write-intent history is unavailable") from None
 
 
 def _live_read_service():

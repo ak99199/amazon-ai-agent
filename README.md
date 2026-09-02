@@ -372,4 +372,10 @@ The controlled flow is: recommendation → human approval → dry-run plan → t
 
 Amazon Ads approval remains pending, no live current-value provider exists, and no advertiser mutation occurs. Exact values cannot come from client requests; only an injected trusted server-side provider can supply the current value.
 
+## Step 19A.17C — Controlled Write Intent + Audit Ledger
+
+The controlled flow is: recommendation → human approval → dry-run plan → trusted current value → exact-value proposal → write preflight → immutable write intent → audit ledger → **STOP**. Prepared intents and their audit events are seller, marketplace, and profile scoped and use a deterministic idempotency key, so identical preparation cannot create duplicates.
+
+Amazon Ads API approval remains pending and no advertiser mutation transport exists. Write intents are internal preparation only, numeric values cannot be edited by the client, and no Amazon Ads change is sent.
+
 Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.
