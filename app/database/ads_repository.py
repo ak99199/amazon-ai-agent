@@ -216,6 +216,19 @@ class AdsPerformanceRepository:
         if status is not None:clauses.append("status=?");values.append(status)
         with get_connection(self._database_path) as connection:rows=connection.execute(f"SELECT * FROM ads_write_intents WHERE {' AND '.join(clauses)} ORDER BY created_at DESC,write_intent_id LIMIT ?",(*values,max(1,min(limit,200)))).fetchall()
         return [self._write_intent(row) for row in rows]
+    def get_write_intent(self,seller_id,marketplace_id,profile_id,write_intent_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:row=connection.execute("SELECT * FROM ads_write_intents WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND write_intent_id=?",(seller_id,marketplace_id,str(profile_id),write_intent_id)).fetchone()
+        return self._write_intent(row) if row else None
+    def transition_write_intent(self,seller_id,marketplace_id,profile_id,write_intent_id,new_status,event_type,created_at):
+        self.initialize();profile_id=str(profile_id);event_id=f"{write_intent_id}:{seller_id}:{marketplace_id}:{profile_id}:prepared:{new_status}:{event_type}"
+        with get_connection(self._database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            changed=connection.execute("UPDATE ads_write_intents SET status=? WHERE write_intent_id=? AND seller_id=? AND marketplace_id=? AND profile_id=? AND status='prepared'",(new_status,write_intent_id,seller_id,marketplace_id,profile_id)).rowcount
+            if changed:
+                connection.execute("INSERT OR IGNORE INTO ads_write_intent_events(event_id,write_intent_id,seller_id,marketplace_id,profile_id,old_status,new_status,event_type,created_at) VALUES(?,?,?,?,?,?,?,?,?)",(event_id,write_intent_id,seller_id,marketplace_id,profile_id,"prepared",new_status,event_type,created_at.isoformat()))
+            row=connection.execute("SELECT * FROM ads_write_intents WHERE write_intent_id=? AND seller_id=? AND marketplace_id=? AND profile_id=?",(write_intent_id,seller_id,marketplace_id,profile_id)).fetchone()
+        return self._write_intent(row) if row else None
     def list_write_intent_events(self,seller_id,marketplace_id,profile_id,write_intent_id):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_write_intent_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND write_intent_id=? ORDER BY created_at,event_id",(seller_id,marketplace_id,str(profile_id),write_intent_id)).fetchall()

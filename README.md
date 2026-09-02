@@ -378,4 +378,10 @@ The controlled flow is: recommendation → human approval → dry-run plan → t
 
 Amazon Ads API approval remains pending and no advertiser mutation transport exists. Write intents are internal preparation only, numeric values cannot be edited by the client, and no Amazon Ads change is sent.
 
+## Step 19A.17D — Write Intent Lifecycle Safety
+
+A prepared write intent undergoes authoritative revalidation and either remains `prepared` or becomes `superseded`; explicit internal cancellation changes `prepared` to `cancelled`. Each terminal transition creates one deterministic audit event and then **STOP**. Stale or cancelled intents cannot be resurrected.
+
+Amazon Ads approval remains pending, no live current-value provider exists, and no advertiser mutation is sent. Clients cannot edit numeric, action, direction, or scope values.
+
 Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.

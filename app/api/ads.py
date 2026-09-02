@@ -11,6 +11,7 @@ from app.services.ads_write_preflight_service import AdsWritePreflightService
 from app.amazon_ads.write_models import AdsWriteConfig
 from app.services.ads_exact_value_proposal_service import AdsExactValueProposalService
 from app.services.ads_write_intent_service import AdsWriteIntentService
+from app.services.ads_write_intent_revalidation_service import AdsWriteIntentRevalidationService
 from app.amazon_ads.write_intent_models import AdsWriteIntentBlockedError
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
 from app.amazon_ads.config import AdsScheduledSyncConfig,AdsSettings
@@ -65,6 +66,10 @@ class ExactValueProposalRequest(BaseModel):
     confirm_exact_value_proposal: bool = False
 class WriteIntentRequest(BaseModel):
     confirm_prepare_write_intent: bool = False
+class WriteIntentRevalidationRequest(BaseModel):
+    confirm_revalidation: bool = False
+class WriteIntentCancelRequest(BaseModel):
+    confirm_cancel_write_intent: bool = False
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -491,6 +496,35 @@ def write_intents(status:str|None=Query(None),limit:int=Query(50,ge=1,le=200)):
                 "message":"Prepared only — no Amazon Ads change has been sent."}
     except ValueError:raise HTTPException(422,"Unsupported write-intent status") from None
     except Exception:raise HTTPException(503,"Write-intent history is unavailable") from None
+
+@router.post("/write-intents/{write_intent_id}/revalidate")
+def revalidate_write_intent(write_intent_id:str,payload:WriteIntentRevalidationRequest):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:raise HTTPException(503,"Write-intent revalidation is unavailable")
+        repository,_,_=_services()
+        service=AdsWriteIntentRevalidationService(AdsRecommendationService(repository),repository,
+            write_config=AdsWriteConfig.from_environment(),approval_status=os.getenv("AMAZON_ADS_APPROVAL_STATUS","pending"))
+        result=service.revalidate(context.seller_id,context.marketplace_id,profile_id,write_intent_id,payload.confirm_revalidation)
+        if result.reason_code=="confirmation_required":raise HTTPException(400,"Explicit write-intent revalidation confirmation is required")
+        if result.reason_code=="intent_not_found":raise HTTPException(404,"Write intent is not available")
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Write-intent revalidation is unavailable") from None
+
+@router.post("/write-intents/{write_intent_id}/cancel")
+def cancel_write_intent(write_intent_id:str,payload:WriteIntentCancelRequest):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:raise HTTPException(503,"Write-intent cancellation is unavailable")
+        repository,_,_=_services()
+        service=AdsWriteIntentRevalidationService(AdsRecommendationService(repository),repository)
+        result=service.cancel(context.seller_id,context.marketplace_id,profile_id,write_intent_id,payload.confirm_cancel_write_intent)
+        if result.reason_code=="confirmation_required":raise HTTPException(400,"Explicit write-intent cancellation confirmation is required")
+        if result.reason_code=="intent_not_found":raise HTTPException(404,"Write intent is not available")
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Write-intent cancellation is unavailable") from None
 
 
 def _live_read_service():

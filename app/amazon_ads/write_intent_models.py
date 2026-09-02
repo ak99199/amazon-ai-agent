@@ -55,3 +55,18 @@ class AdsWriteIntentBlockedError(ValueError):
     def __init__(self, status):
         self.status = status
         super().__init__(status)
+
+
+@dataclass(frozen=True)
+class AdsWriteIntentLifecycleResult:
+    write_intent_id: str
+    status: str
+    reason_code: str
+    revalidated_at: datetime
+    safety_checks: tuple[dict[str, object], ...] = ()
+
+    def public_dict(self):
+        return {"write_intent_id": self.write_intent_id, "status": self.status,
+                "reason_code": self.reason_code,
+                "revalidated_at": self.revalidated_at.isoformat(),
+                "safety_checks": list(self.safety_checks)}
