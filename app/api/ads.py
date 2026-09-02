@@ -9,6 +9,7 @@ from app.services.ads_action_service import AdsActionService, UnknownAdsRecommen
 from app.services.ads_execution_plan_service import AdsExecutionPlanService, UnknownAdsExecutionRecommendationError
 from app.services.ads_write_preflight_service import AdsWritePreflightService
 from app.amazon_ads.write_models import AdsWriteConfig
+from app.services.ads_exact_value_proposal_service import AdsExactValueProposalService
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
 from app.amazon_ads.config import AdsScheduledSyncConfig,AdsSettings
 from app.amazon_ads.auth import AdsLwaAuthenticator
@@ -58,6 +59,8 @@ class LiveSmokeTestRequest(BaseModel):
     confirm_live_read: bool = False
 class WritePreflightRequest(BaseModel):
     confirm_controlled_write_preflight: bool = False
+class ExactValueProposalRequest(BaseModel):
+    confirm_exact_value_proposal: bool = False
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -431,6 +434,21 @@ def write_preflight(execution_plan_id:str,payload:WritePreflightRequest):
         return result.public_dict()
     except HTTPException:raise
     except Exception:raise HTTPException(503,"Controlled Ads write preflight is unavailable") from None
+
+@router.post("/execution-plans/{execution_plan_id}/value-proposal")
+def exact_value_proposal(execution_plan_id:str,payload:ExactValueProposalRequest):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:raise HTTPException(503,"Exact-value proposal is unavailable")
+        repository,_,_=_services()
+        # No production current-value provider exists in this step: fail closed.
+        service=AdsExactValueProposalService(AdsRecommendationService(repository),repository)
+        result=service.propose(context.seller_id,context.marketplace_id,profile_id,execution_plan_id,payload.confirm_exact_value_proposal)
+        if result.proposal_status=="confirmation_required":raise HTTPException(400,"Explicit exact-value proposal confirmation is required")
+        if result.proposal_status=="plan_not_found":raise HTTPException(404,"Execution plan is not available")
+        return result.public_dict()
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Exact-value proposal is unavailable") from None
 
 
 def _live_read_service():

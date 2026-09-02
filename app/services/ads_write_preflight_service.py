@@ -11,7 +11,7 @@ class AdsWritePreflightService:
  def __init__(self,recommendation_service,repository,config=None,approval_status="pending",safety_service=None,now=None):self.recommendations=recommendation_service;self.repository=repository;self.config=config or AdsWriteConfig.from_environment();self.approval_status=str(approval_status or "pending").lower();self.safety=safety_service or AdsExecutionSafetyService();self.now=now or (lambda:datetime.now(timezone.utc))
  @staticmethod
  def _check(name,passed,reason):return {"name":name,"passed":bool(passed),"reason":reason}
- def preflight(self,seller,marketplace,profile,execution_plan_id,confirm=False,window=30):
+ def preflight(self,seller,marketplace,profile,execution_plan_id,confirm=False,window=30,proposal=None):
   profile=str(profile);plan=None;checks=[]
   def add(name,passed,reason):checks.append(self._check(name,passed,reason));return passed
   if not add("EXPLICIT_CONFIRMATION",confirm is True,"Explicit controlled-write preflight confirmation is required."):return self._result(execution_plan_id,seller,marketplace,profile,"confirmation_required",False,checks,plan)
@@ -33,9 +33,9 @@ class AdsWritePreflightService:
   if not add("CURRENT_RECOMMENDATION",current_ok,"Recommendation remains current and unchanged."):return self._result(execution_plan_id,seller,marketplace,profile,"stale_recommendation",False,checks,plan)
   supported=plan.action_type in SUPPORTED_ACTIONS and ACTION_CODES.get(plan.recommendation_code)==plan.action_type
   if not add("SUPPORTED_ACTION",supported,"Action is in the controlled future-write allowlist."):return self._result(execution_plan_id,seller,marketplace,profile,"unsupported_action",False,checks,plan)
-  exact=plan.current_value is not None and plan.proposed_value is not None
+  exact=bool(proposal and proposal.eligible and proposal.proposal_status=="eligible_proposal" and proposal.execution_plan_id==execution_plan_id and proposal.recommendation_id==plan.recommendation_id and proposal.decision_id==plan.decision_id and proposal.seller_id==seller and proposal.marketplace_id==marketplace and proposal.profile_id==profile and proposal.action_type==plan.action_type and proposal.direction==plan.direction and proposal.current_value is not None and proposal.proposed_value is not None)
   if not add("EXACT_VALUE_AVAILABLE",exact,"Validated exact current and proposed values are present."):return self._result(execution_plan_id,seller,marketplace,profile,"exact_value_required",False,checks,plan)
-  hard=self._hard_limits(plan)
+  hard=self._hard_limits(proposal)
   if not add("HARD_LIMITS",hard,"Exact values remain within configured hard limits."):return self._result(execution_plan_id,seller,marketplace,profile,"hard_limit_violation",False,checks,plan)
   return self._result(execution_plan_id,seller,marketplace,profile,"eligible_preflight",True,checks,plan)
  def _hard_limits(self,plan):

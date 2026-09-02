@@ -366,4 +366,10 @@ Secret values are validated and passed directly through an `AdsSettings` instanc
 
 The controlled flow is: historical data → deterministic recommendation → human approval → persisted dry-run execution plan → write preflight → **STOP**. `AMAZON_ADS_WRITE_ENABLED` defaults to `false`, and `AMAZON_ADS_WRITE_DRY_RUN_ONLY` defaults to `true`; both are independent from read and execution-plan settings and malformed values fail closed.
 
+## Step 19A.17B — Controlled Exact-Value Proposal Foundation
+
+The controlled flow is: recommendation → human approval → dry-run plan → trusted current value → bounded exact-value proposal → write preflight → **STOP**. Bid proposals use `Decimal` and deterministic two-decimal, `ROUND_HALF_UP` quantization. `AMAZON_ADS_BID_PROPOSAL_PERCENT` defaults to `0`, which disables proposals, and must remain within the existing direction-specific percentage cap and single-action amount cap.
+
+Amazon Ads approval remains pending, no live current-value provider exists, and no advertiser mutation occurs. Exact values cannot come from client requests; only an injected trusted server-side provider can supply the current value.
+
 Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.

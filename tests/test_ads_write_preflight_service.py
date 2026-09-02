@@ -47,5 +47,5 @@ def test_preflight_is_deterministic_safe_and_has_no_transport():
  public=first.public_dict();assert "secret" not in str(public).lower() and "authorization" not in str(public).lower() and "access_token" not in str(public).lower()
  assert not hasattr(AdsWritePreflightService,"execute") and not hasattr(AdsWritePreflightService,"apply") and not hasattr(AdsWritePreflightService,"push")
 def test_exact_bid_values_still_require_decimal_safe_hard_limits():
- assert run(plan_marker=replace(fixtures()[2],current_value="1.00",proposed_value="1.50")).status=="hard_limit_violation"
- assert run(plan_marker=replace(fixtures()[2],current_value="1.00",proposed_value="1.10")).status=="hard_limit_violation"
+ assert run(plan_marker=replace(fixtures()[2],current_value="1.00",proposed_value="1.50")).status=="exact_value_required"
+ assert run(plan_marker=replace(fixtures()[2],current_value="1.00",proposed_value="1.10")).status=="exact_value_required"
