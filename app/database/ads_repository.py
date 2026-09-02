@@ -7,6 +7,7 @@ import uuid
 from app.amazon_ads.action_models import AdsRecommendationDecision
 from app.amazon_ads.execution_models import AdsExecutionPlan
 from app.amazon_ads.write_intent_models import AdsWriteIntent
+from app.amazon_ads.write_command_models import AdsSealedWriteCommand
 from app.amazon_ads.sync_models import AdsManualSyncResult
 from app.amazon_ads.rule_tuning_models import validate_threshold_snapshot
 import json
@@ -43,6 +44,10 @@ CREATE TABLE IF NOT EXISTS ads_write_intents (write_intent_id TEXT PRIMARY KEY,i
 CREATE INDEX IF NOT EXISTS idx_ads_write_intents_scope_created ON ads_write_intents(seller_id,marketplace_id,profile_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS ads_write_intent_events (event_id TEXT PRIMARY KEY,write_intent_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,old_status TEXT,new_status TEXT NOT NULL CHECK(new_status IN ('prepared','superseded','cancelled')),event_type TEXT NOT NULL,created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_ads_write_intent_events_scope_created ON ads_write_intent_events(seller_id,marketplace_id,profile_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS ads_sealed_write_commands (command_id TEXT PRIMARY KEY,command_hash TEXT NOT NULL UNIQUE,write_intent_id TEXT NOT NULL,target_resolution_id TEXT NOT NULL,execution_plan_id TEXT NOT NULL,recommendation_id TEXT NOT NULL,decision_id TEXT NOT NULL,proposal_id TEXT NOT NULL,preflight_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,ad_product TEXT NOT NULL,advertiser_entity_type TEXT NOT NULL,advertiser_entity_id TEXT NOT NULL,campaign_id TEXT,ad_group_id TEXT,action_type TEXT NOT NULL,mutation_kind TEXT NOT NULL,direction TEXT NOT NULL,expected_current_value TEXT NOT NULL,proposed_value TEXT NOT NULL,currency TEXT,status TEXT NOT NULL CHECK(status IN ('sealed','superseded','cancelled')),created_at TEXT NOT NULL,schema_version INTEGER NOT NULL,source TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ads_sealed_commands_scope_created ON ads_sealed_write_commands(seller_id,marketplace_id,profile_id,created_at DESC);
+CREATE TABLE IF NOT EXISTS ads_sealed_write_command_events (event_id TEXT PRIMARY KEY,command_id TEXT NOT NULL,seller_id TEXT NOT NULL,marketplace_id TEXT NOT NULL,profile_id TEXT NOT NULL,event_type TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_ads_sealed_command_events_scope_created ON ads_sealed_write_command_events(seller_id,marketplace_id,profile_id,created_at DESC);
 """
 
 
@@ -232,6 +237,23 @@ class AdsPerformanceRepository:
     def list_write_intent_events(self,seller_id,marketplace_id,profile_id,write_intent_id):
         self.initialize()
         with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_write_intent_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND write_intent_id=? ORDER BY created_at,event_id",(seller_id,marketplace_id,str(profile_id),write_intent_id)).fetchall()
+    def save_sealed_write_command(self,command):
+        self.initialize();values=(command.command_id,command.command_hash,command.write_intent_id,command.target_resolution_id,command.execution_plan_id,command.recommendation_id,command.decision_id,command.proposal_id,command.preflight_id,command.seller_id,command.marketplace_id,command.profile_id,command.ad_product,command.advertiser_entity_type,command.advertiser_entity_id,command.campaign_id,command.ad_group_id,command.action_type,command.mutation_kind,command.direction,command.expected_current_value,command.proposed_value,command.currency,command.status,command.created_at.isoformat(),command.schema_version,command.source)
+        event_id=f"{command.command_id}:{command.seller_id}:{command.marketplace_id}:{command.profile_id}:WRITE_COMMAND_SEALED"
+        with get_connection(self._database_path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("INSERT OR IGNORE INTO ads_sealed_write_commands(command_id,command_hash,write_intent_id,target_resolution_id,execution_plan_id,recommendation_id,decision_id,proposal_id,preflight_id,seller_id,marketplace_id,profile_id,ad_product,advertiser_entity_type,advertiser_entity_id,campaign_id,ad_group_id,action_type,mutation_kind,direction,expected_current_value,proposed_value,currency,status,created_at,schema_version,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",values)
+            connection.execute("INSERT OR IGNORE INTO ads_sealed_write_command_events(event_id,command_id,seller_id,marketplace_id,profile_id,event_type,created_at) VALUES(?,?,?,?,?,?,?)",(event_id,command.command_id,command.seller_id,command.marketplace_id,command.profile_id,"WRITE_COMMAND_SEALED",command.created_at.isoformat()))
+            row=connection.execute("SELECT * FROM ads_sealed_write_commands WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND command_hash=?",(command.seller_id,command.marketplace_id,command.profile_id,command.command_hash)).fetchone()
+        return self._sealed_command(row)
+    def list_sealed_write_commands(self,seller_id,marketplace_id,profile_id,status=None,limit=50):
+        self.initialize();clauses=["seller_id=?","marketplace_id=?","profile_id=?"];values=[seller_id,marketplace_id,str(profile_id)]
+        if status is not None:clauses.append("status=?");values.append(status)
+        with get_connection(self._database_path) as connection:rows=connection.execute(f"SELECT * FROM ads_sealed_write_commands WHERE {' AND '.join(clauses)} ORDER BY created_at DESC,command_id LIMIT ?",(*values,max(1,min(limit,200)))).fetchall()
+        return [self._sealed_command(row) for row in rows]
+    def list_sealed_write_command_events(self,seller_id,marketplace_id,profile_id,command_id):
+        self.initialize()
+        with get_connection(self._database_path) as connection:return connection.execute("SELECT * FROM ads_sealed_write_command_events WHERE seller_id=? AND marketplace_id=? AND profile_id=? AND command_id=? ORDER BY created_at,event_id",(seller_id,marketplace_id,str(profile_id),command_id)).fetchall()
     def save_sync_run(self,run):
         self.initialize();values=(run.sync_id,run.seller_id,run.marketplace_id,run.profile_id,run.mode,run.start_date.isoformat(),run.end_date.isoformat(),run.started_at.isoformat(),run.finished_at.isoformat() if run.finished_at else None,run.status,int(run.success),run.campaigns_fetched,run.ad_groups_fetched,run.keywords_fetched,run.targets_fetched,run.report_rows_received,run.rows_normalized,run.rows_saved,run.rows_failed,run.error_code,run.safe_error_message,run.started_at.isoformat(),run.trigger_source)
         with get_connection(self._database_path) as connection:connection.execute("INSERT INTO ads_sync_runs(sync_id,seller_id,marketplace_id,profile_id,mode,start_date,end_date,started_at,finished_at,status,success,campaigns_fetched,ad_groups_fetched,keywords_fetched,targets_fetched,report_rows_received,rows_normalized,rows_saved,rows_failed,error_code,error_summary,created_at,trigger_source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(sync_id) DO UPDATE SET finished_at=excluded.finished_at,status=excluded.status,success=excluded.success,campaigns_fetched=excluded.campaigns_fetched,ad_groups_fetched=excluded.ad_groups_fetched,keywords_fetched=excluded.keywords_fetched,targets_fetched=excluded.targets_fetched,report_rows_received=excluded.report_rows_received,rows_normalized=excluded.rows_normalized,rows_saved=excluded.rows_saved,rows_failed=excluded.rows_failed,error_code=excluded.error_code,error_summary=excluded.error_summary,trigger_source=excluded.trigger_source",values)
@@ -432,6 +454,9 @@ class AdsPerformanceRepository:
     @staticmethod
     def _write_intent(item):
         return AdsWriteIntent(item["write_intent_id"],item["idempotency_key"],item["execution_plan_id"],item["recommendation_id"],item["decision_id"],item["proposal_id"],item["preflight_id"],item["seller_id"],item["marketplace_id"],item["profile_id"],item["scope_type"],item["scope_id"],item["recommendation_code"],item["action_type"],item["direction"],item["current_value"],item["proposed_value"],item["currency"],item["status"],datetime.fromisoformat(item["created_at"]),item["source"],item["schema_version"])
+    @staticmethod
+    def _sealed_command(item):
+        return AdsSealedWriteCommand(item["command_id"],item["command_hash"],item["write_intent_id"],item["target_resolution_id"],item["execution_plan_id"],item["recommendation_id"],item["decision_id"],item["proposal_id"],item["preflight_id"],item["seller_id"],item["marketplace_id"],item["profile_id"],item["ad_product"],item["advertiser_entity_type"],item["advertiser_entity_id"],item["campaign_id"],item["ad_group_id"],item["action_type"],item["mutation_kind"],item["direction"],item["expected_current_value"],item["proposed_value"],item["currency"],item["status"],datetime.fromisoformat(item["created_at"]),item["schema_version"],item["source"])
     @staticmethod
     def _decision(item):
         return AdsRecommendationDecision(item["recommendation_id"],item["seller_id"],item["marketplace_id"],item["profile_id"],item["scope_type"],item["scope_id"],item["recommendation_code"],item["recommendation_title"],item["status"],item["review_note"],item["review_source"],item["decision_id"],datetime.fromisoformat(item["created_at"]),datetime.fromisoformat(item["updated_at"]),datetime.fromisoformat(item["reviewed_at"]) if item["reviewed_at"] else None,json.loads(item["recommendation_snapshot_json"]) if "recommendation_snapshot_json" in item.keys() and item["recommendation_snapshot_json"] else None)

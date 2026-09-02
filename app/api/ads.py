@@ -13,6 +13,8 @@ from app.services.ads_exact_value_proposal_service import AdsExactValueProposalS
 from app.services.ads_write_intent_service import AdsWriteIntentService
 from app.services.ads_write_intent_revalidation_service import AdsWriteIntentRevalidationService
 from app.services.ads_write_target_resolution_service import AdsWriteTargetResolutionService
+from app.services.ads_sealed_write_command_service import AdsSealedWriteCommandService
+from app.amazon_ads.write_command_models import AdsSealedWriteCommandBlockedError
 from app.amazon_ads.write_intent_models import AdsWriteIntentBlockedError
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
 from app.amazon_ads.config import AdsScheduledSyncConfig,AdsSettings
@@ -73,6 +75,8 @@ class WriteIntentCancelRequest(BaseModel):
     confirm_cancel_write_intent: bool = False
 class WriteTargetResolutionRequest(BaseModel):
     confirm_target_resolution: bool = False
+class SealedWriteCommandRequest(BaseModel):
+    confirm_seal_write_command: bool = False
 class DecisionRequest(BaseModel):
     status: str
     review_note: str | None = Field(default=None, max_length=1000)
@@ -545,6 +549,35 @@ def resolve_write_target(write_intent_id:str,payload:WriteTargetResolutionReques
         return result.public_dict()
     except HTTPException:raise
     except Exception:raise HTTPException(503,"Advertiser target resolution is unavailable") from None
+
+@router.post("/write-intents/{write_intent_id}/sealed-command")
+def seal_write_command(write_intent_id:str,payload:SealedWriteCommandRequest):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:raise HTTPException(503,"Sealed-command preparation is unavailable")
+        if payload.confirm_seal_write_command is not True:raise HTTPException(400,"Explicit sealed-command confirmation is required")
+        repository,_,_=_services();recommendations=AdsRecommendationService(repository)
+        lifecycle=AdsWriteIntentRevalidationService(recommendations,repository,
+            write_config=AdsWriteConfig.from_environment(),approval_status=os.getenv("AMAZON_ADS_APPROVAL_STATUS","pending"))
+        target=AdsWriteTargetResolutionService(repository,lifecycle).resolve(context.seller_id,context.marketplace_id,profile_id,write_intent_id,True)
+        command=AdsSealedWriteCommandService(repository,lifecycle,AdsWriteConfig.from_environment()).seal(
+            context.seller_id,context.marketplace_id,profile_id,write_intent_id,True,target)
+        return command.public_dict()
+    except AdsSealedWriteCommandBlockedError as error:
+        if error.status=="intent_not_found":raise HTTPException(404,"Write intent is not available") from None
+        return {"status":error.status,"sealed":False,"message":"No Amazon Ads change has been sent."}
+    except HTTPException:raise
+    except Exception:raise HTTPException(503,"Sealed-command preparation is unavailable") from None
+
+@router.get("/sealed-write-commands")
+def sealed_write_commands(status:str|None=Query(None),limit:int=Query(50,ge=1,le=200)):
+    try:
+        context=_context();profile_id=os.getenv("AMAZON_ADS_PROFILE_ID")
+        if not profile_id:return {"commands":[],"count":0}
+        repository,_,_=_services();records=AdsSealedWriteCommandService(repository,None).list_commands(context.seller_id,context.marketplace_id,profile_id,status,limit)
+        return {"commands":[record.public_dict() for record in records],"count":len(records),"message":"Sealed metadata only — no Amazon Ads change has been sent."}
+    except ValueError:raise HTTPException(422,"Unsupported sealed-command status") from None
+    except Exception:raise HTTPException(503,"Sealed-command history is unavailable") from None
 
 
 def _live_read_service():

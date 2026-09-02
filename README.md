@@ -390,4 +390,10 @@ The safe flow is: prepared write intent → authoritative lifecycle revalidation
 
 Amazon Ads approval remains pending, no live target resolver or mutation transport exists, and no Amazon Ads change is sent. Campaign-level bid reviews are never reinterpreted as keyword bids, campaign budgets, ad-group defaults, or placement adjustments; clients cannot provide scope, entity, action, direction, or numeric values.
 
+## Step 19A.17F — Sealed Write Command Foundation
+
+The safe flow is: write intent → authoritative lifecycle revalidation → trusted target resolution → sealed immutable write command → **STOP**. Sealed commands contain internal metadata only; there is no Amazon request payload or advertiser mutation transport.
+
+All command fields are immutable. Bid values use canonical `Decimal` text, so equivalent forms such as `1.0`, `1.00`, and `1.000` hash identically. Full SHA-256 command hashes and derived IDs make repeated preparation deterministic and idempotent. Amazon Ads approval remains pending and no live providers are introduced.
+
 Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.
