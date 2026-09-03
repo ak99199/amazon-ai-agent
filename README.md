@@ -396,4 +396,10 @@ The safe flow is: write intent → authoritative lifecycle revalidation → trus
 
 All command fields are immutable. Bid values use canonical `Decimal` text, so equivalent forms such as `1.0`, `1.00`, and `1.000` hash identically. Full SHA-256 command hashes and derived IDs make repeated preparation deterministic and idempotent. Amazon Ads approval remains pending and no live providers are introduced.
 
+## Step 19A.17G — Persistent Ads Control-Plane Repository Foundation
+
+Local development defaults `AMAZON_ADS_CONTROL_PLANE_BACKEND` to `sqlite`. Future production may select `dynamodb`, which requires a dedicated `AMAZON_ADS_DYNAMODB_CONTROL_PLANE_TABLE`; missing or unknown configuration fails closed without SQLite fallback.
+
+Historical Ads storage owns performance and sync history. Control-plane storage owns human decisions, plans, rules, write intents, sealed commands, and their audit events. This step creates no AWS table or IAM resource, performs no deployment or live Amazon API call, and enables no advertiser mutation.
+
 Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.

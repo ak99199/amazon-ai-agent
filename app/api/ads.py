@@ -5,6 +5,9 @@ from datetime import date, datetime, timezone
 from pydantic import BaseModel, Field
 from app.config import ConfigurationError, require_dashboard_context
 from app.database.ads_repository import AdsPerformanceRepository
+from app.database.ads_base import create_ads_repository
+from app.database.ads_control_plane_factory import create_ads_control_plane_repository
+from app.database.ads_control_plane_base import AdsRepositoryCapabilities
 from app.services.ads_action_service import AdsActionService, UnknownAdsRecommendationError
 from app.services.ads_execution_plan_service import AdsExecutionPlanService, UnknownAdsExecutionRecommendationError
 from app.services.ads_write_preflight_service import AdsWritePreflightService
@@ -83,7 +86,10 @@ class DecisionRequest(BaseModel):
 
 
 def _services():
-    repository = AdsPerformanceRepository()
+    control_plane = create_ads_control_plane_repository()
+    resolved_historical = create_ads_repository()
+    historical = control_plane if isinstance(control_plane, AdsPerformanceRepository) and isinstance(resolved_historical, AdsPerformanceRepository) else resolved_historical
+    repository = AdsRepositoryCapabilities(historical, control_plane)
     diagnostics = AdsDiagnosticsService(repository)
     return repository, diagnostics, AdsReadinessService(diagnostics)
 
