@@ -115,7 +115,7 @@ Protected paths are `/dashboard`, `/api/listings/*`, `/api/portfolio/*`, and `/a
 
 The web dashboard uses a separate Lambda Function URL function, distinct from the existing `amazon-sp-api-agent` snapshot Lambda. Browser → Function URL → FastAPI/Mangum → DynamoDB. Handler: `web_lambda_handler.handler`.
 
-Build the web artifact only with `./deploy/build_web_lambda.ps1`; it creates `dist/amazon-ai-agent-web-lambda.zip` and does not upload, deploy, or change infrastructure. The build includes the application, templates, static files, `main.py`, `web_lambda_handler.py`, and runtime dependencies while excluding `.env`, tests, local SQLite data, caches, Git metadata, and existing distribution files.
+Build the web artifact only with `./deploy/build_web_lambda.ps1`; it uses `.venv_step7` and the dedicated `deploy/requirements_web_lambda.txt` runtime manifest, creates `dist/amazon-ai-agent-web-lambda.zip`, and does not upload, deploy, or change infrastructure. Test-only dependencies such as pytest are excluded from the production ZIP. The recursive application copy includes the Ads control-plane factory, protocol, DynamoDB repository, models, and services alongside templates, static files, `main.py`, `web_lambda_handler.py`, and runtime dependencies. Exact test/venv/cache/Git directories plus `.env`, local SQLite data, Windows-native artifacts, and existing distribution files are excluded.
 
 For production set `STORAGE_BACKEND=dynamodb`, `DYNAMODB_SNAPSHOTS_TABLE`, `DYNAMODB_RUNS_TABLE`, `DASHBOARD_ADMIN_USERNAME`, `DASHBOARD_ADMIN_PASSWORD_HASH`, `SESSION_SECRET_KEY`, `SESSION_COOKIE_SECURE=true`, and `ENABLE_INTERNAL_SNAPSHOT_ROUTE=false`. Function URL HTTPS supports Secure session cookies and redirects.
 
@@ -407,5 +407,11 @@ Historical Ads storage owns performance and sync history. Control-plane storage 
 The DynamoDB control-plane repository exposes every current routed capability for decisions, dry-run plans, rule versions and activation/rollback, rule-tuning proposals, write-intent lifecycles, sealed commands, and audit history. Domain models, `Decimal` values, timezone-safe ISO timestamps, nested fields, scoped keys, deterministic ordering, conditional writes, and coupled transactional events are preserved without full-table scans.
 
 Historical and control-plane repositories remain separate. No DynamoDB table or IAM resource is created, no Lambda is deployed, no Amazon Ads call or advertiser mutation occurs, and production enablement still requires a later infrastructure step.
+
+## Step 19A.17I — Web Lambda Control-Plane Deployment Readiness
+
+Future production web Lambda configuration keeps the two Ads storage domains independent. Historical reporting uses `AMAZON_ADS_STORAGE_BACKEND=dynamodb`, `AMAZON_ADS_DYNAMODB_PERFORMANCE_TABLE=<configured table name>`, and `AMAZON_ADS_DYNAMODB_SYNC_RUNS_TABLE=<configured table name>`. The control plane separately uses `AMAZON_ADS_CONTROL_PLANE_BACKEND=dynamodb` and its dedicated `AMAZON_ADS_DYNAMODB_CONTROL_PLANE_TABLE=<configured table name>`.
+
+An unknown control-plane backend or DynamoDB mode without its dedicated table fails closed and never falls back to SQLite. Step 19A.17I creates no table, changes no IAM or Lambda environment, deploys no Lambda, makes no live Amazon Ads call, and enables no advertiser mutation.
 
 Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.
