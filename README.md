@@ -402,4 +402,10 @@ Local development defaults `AMAZON_ADS_CONTROL_PLANE_BACKEND` to `sqlite`. Futur
 
 Historical Ads storage owns performance and sync history. Control-plane storage owns human decisions, plans, rules, write intents, sealed commands, and their audit events. This step creates no AWS table or IAM resource, performs no deployment or live Amazon API call, and enables no advertiser mutation.
 
+## Step 19A.17H — Full DynamoDB Control-Plane Capability Parity
+
+The DynamoDB control-plane repository exposes every current routed capability for decisions, dry-run plans, rule versions and activation/rollback, rule-tuning proposals, write-intent lifecycles, sealed commands, and audit history. Domain models, `Decimal` values, timezone-safe ISO timestamps, nested fields, scoped keys, deterministic ordering, conditional writes, and coupled transactional events are preserved without full-table scans.
+
+Historical and control-plane repositories remain separate. No DynamoDB table or IAM resource is created, no Lambda is deployed, no Amazon Ads call or advertiser mutation occurs, and production enablement still requires a later infrastructure step.
+
 Write preflight performs internal, server-scoped validation only. Current plans intentionally contain no exact mutation values, so bid-direction and keyword review plans stop at `exact_value_required`. No Amazon Ads advertiser mutation transport, execute/apply/push operation, campaign update, bid or budget change, keyword mutation, or targeting mutation is implemented. Amazon Ads API approval remains pending, and no Amazon Ads change is sent.

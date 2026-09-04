@@ -17,9 +17,11 @@ class AdsControlPlaneRepository(Protocol):
 CONTROL_PLANE_METHODS=frozenset({
     "get_decision","list_decisions","save_decision","list_decision_events",
     "get_execution_plan","list_execution_plans","save_execution_plan","list_execution_events",
-    "list_rule_versions","get_rule_version","save_rule_version","activate_rule_version",
-    "list_rule_activation_events","list_rule_tuning_proposals","save_rule_tuning_proposal",
-    "save_rule_tuning_decision","list_rule_tuning_events",
+    "list_rule_versions","get_rule_version","get_active_rule_version","create_rule_version",
+    "update_rule_version_status","activate_rule_version","rollback_rule_version","get_rollback_candidate",
+    "insert_rule_activation_event","list_rule_activation_events","get_latest_rule_activation_event",
+    "list_rule_tuning_proposals","get_rule_tuning_proposal","save_rule_tuning_proposal",
+    "review_rule_tuning_proposal",
     "save_write_intent","get_write_intent","list_write_intents","list_write_intent_events",
     "transition_write_intent","save_sealed_write_command","list_sealed_write_commands",
     "list_sealed_write_command_events"})
