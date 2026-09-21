@@ -1,5 +1,5 @@
 import json,pytest
-from app.aws.secrets import SecretLoadError,load_ads_secret,load_sp_api_secret
+from app.aws.secrets import SecretLoadError,load_ads_secret,load_sp_api_secret,save_ads_refresh_token
 class Client:
     def __init__(self,value): self.value=value
     def get_secret_value(self,**kwargs): return {"SecretString":self.value}
@@ -28,3 +28,32 @@ def test_ads_secrets_manager_failure_is_sanitized():
   def get_secret_value(self,**kwargs):raise RuntimeError("request-id private-secret-value")
  with pytest.raises(SecretLoadError) as error:load_ads_secret("private-arn",Broken())
  assert "request-id" not in str(error.value) and "private" not in str(error.value)
+
+@pytest.mark.parametrize("previous",[None,"old-refresh"])
+def test_ads_refresh_token_persistence_preserves_existing_secret(previous):
+ original={"AMAZON_ADS_CLIENT_ID":"id","AMAZON_ADS_CLIENT_SECRET":"secret","EXTRA":{"preserved":True}}
+ if previous is not None:original["AMAZON_ADS_REFRESH_TOKEN"]=previous
+ class Store(Client):
+  def put_secret_value(self,**kwargs):self.written=kwargs
+ client=Store(json.dumps(original))
+ assert load_ads_secret("existing",client,require_refresh_token=False)=={key:original[key] for key in ("AMAZON_ADS_CLIENT_ID","AMAZON_ADS_CLIENT_SECRET")}
+ save_ads_refresh_token("existing","new-refresh",client,"id")
+ assert client.written["SecretId"]=="existing"
+ assert json.loads(client.written["SecretString"])=={**original,"AMAZON_ADS_REFRESH_TOKEN":"new-refresh"}
+ client.value=client.written["SecretString"]
+ assert load_ads_secret("existing",client)["AMAZON_ADS_REFRESH_TOKEN"]=="new-refresh"
+
+@pytest.mark.parametrize("failure",["read","write","invalid_json","client_mismatch"])
+def test_ads_refresh_persistence_failure_is_safe(failure):
+ class Store:
+  writes=0
+  def get_secret_value(self,**kwargs):
+   if failure=="read":raise RuntimeError("private-token")
+   return {"SecretString":"not-json" if failure=="invalid_json" else json.dumps({"AMAZON_ADS_CLIENT_ID":"other" if failure=="client_mismatch" else "id","AMAZON_ADS_CLIENT_SECRET":"secret"})}
+  def put_secret_value(self,**kwargs):
+   self.writes+=1
+   raise RuntimeError("private-token")
+ client=Store()
+ with pytest.raises(SecretLoadError) as error:save_ads_refresh_token("existing","private-token",client,"id")
+ assert str(error.value)=="Unable to save Amazon Ads credentials"
+ assert client.writes==(1 if failure=="write" else 0)

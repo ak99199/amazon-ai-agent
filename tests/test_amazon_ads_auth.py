@@ -14,3 +14,9 @@ def test_lwa_refresh_flow_is_normalized():
 def test_authentication_error_redacts_credentials():
     with pytest.raises(AdsAuthenticationError) as error:AdsLwaAuthenticator(settings(),Session(Response(401))).get_access_token()
     assert "ads-secret" not in str(error.value) and "ads-refresh" not in str(error.value)
+def test_authorization_code_exchange_uses_lwa_and_returns_refresh_token():
+    session=Session(Response(200,{"access_token":"access-value","refresh_token":"refresh-value"}))
+    token=AdsLwaAuthenticator(settings(),session).exchange_authorization_code("code-value","https://example.com/")
+    assert session.url==LWA_TOKEN_ENDPOINT and session.data=={"grant_type":"authorization_code","code":"code-value","client_id":"ads-id","client_secret":"ads-secret","redirect_uri":"https://example.com/"}
+    assert token=="refresh-value"
+    with pytest.raises(AdsAuthenticationError):AdsLwaAuthenticator(settings(),Session(Response(200,{"access_token":"only-access"}))).exchange_authorization_code("code-value","https://example.com/")
