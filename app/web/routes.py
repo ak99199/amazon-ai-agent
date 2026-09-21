@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from app.alerts.repository import create_alert_repository
 from app.config import require_dashboard_context
-from app.database.ads_repository import AdsPerformanceRepository
+from app.api.ads import _services as _ads_services
 from app.database.base import create_snapshot_repository
 from app.services.ads_diagnostics_service import AdsDiagnosticsService
 from app.services.ads_readiness_service import AdsReadinessService
@@ -43,9 +43,11 @@ def _apply_ui_filters(rows,risk_level,needs_attention):
   ranges={"high":lambda x:x["risk_score"]>=70,"medium":lambda x:30<=x["risk_score"]<70,"low":lambda x:x["risk_score"]<30};rows=[row for row in rows if risk_level in ranges and ranges[risk_level](row)]
  if needs_attention:rows=[row for row in rows if row["priority"] in ("critical","high")]
  return rows
+def _ads_repository():return _ads_services()[0]
+
 def _ads_readiness(context):
  try:
-  result=AdsReadinessService(AdsDiagnosticsService(AdsPerformanceRepository())).get(context.seller_id,context.marketplace_id).public_dict();result["production_live_read"]=AdsProductionReadinessService().get().public_dict();return result
+  result=AdsReadinessService(AdsDiagnosticsService(_ads_repository())).get(context.seller_id,context.marketplace_id).public_dict();result["production_live_read"]=AdsProductionReadinessService().get().public_dict();return result
  except Exception:return {"overall_status":"error","approval_status":"unknown","config_status":"unavailable","profile_status":"unavailable","data_status":"unavailable","ingestion_run_count":0,"last_ingestion_at":None,"unavailable":True}
 def _normalize_ads_readiness(value):
  result=dict(value) if isinstance(value,dict) else {"unavailable":True}
@@ -60,7 +62,7 @@ def _ads_recommendations(context):
  try:
   profile_id=getenv("AMAZON_ADS_PROFILE_ID")
   if not profile_id:return {"recommendations":[],"count":0,"high_count":0,"unavailable":False}
-  records=AdsRecommendationService(AdsPerformanceRepository()).get_recommendations(context.seller_id,context.marketplace_id,profile_id,30)
+  records=AdsRecommendationService(_ads_repository()).get_recommendations(context.seller_id,context.marketplace_id,profile_id,30)
   public=[item.public_dict() for item in records]
   return {"recommendations":public[:5],"count":len(public),"high_count":sum(item["priority"] in ("critical","high") for item in public),"unavailable":False}
  except Exception:return {"recommendations":[],"count":0,"high_count":0,"unavailable":True}
@@ -68,51 +70,51 @@ def _ads_actions(context):
  try:
   profile_id=getenv("AMAZON_ADS_PROFILE_ID")
   if not profile_id:return {"actions":[],"count":0,"pending_count":0,"approved_count":0,"rejected_count":0,"dismissed_count":0,"unavailable":False}
-  repository=AdsPerformanceRepository();return {**AdsActionService(AdsRecommendationService(repository),repository).list_actions(context.seller_id,context.marketplace_id,profile_id,30,limit=5),"unavailable":False}
+  repository=_ads_repository();return {**AdsActionService(AdsRecommendationService(repository),repository).list_actions(context.seller_id,context.marketplace_id,profile_id,30,limit=5),"unavailable":False}
  except Exception:return {"actions":[],"count":0,"pending_count":0,"approved_count":0,"rejected_count":0,"dismissed_count":0,"unavailable":True}
 def _ads_execution_plans(context):
  try:
   profile_id=getenv("AMAZON_ADS_PROFILE_ID")
   if not profile_id:return {"plans":[],"unavailable":False}
-  repository=AdsPerformanceRepository();return {"plans":AdsExecutionPlanService(AdsRecommendationService(repository),repository).list_plans(context.seller_id,context.marketplace_id,profile_id,5),"unavailable":False}
+  repository=_ads_repository();return {"plans":AdsExecutionPlanService(AdsRecommendationService(repository),repository).list_plans(context.seller_id,context.marketplace_id,profile_id,5),"unavailable":False}
  except Exception:return {"plans":[],"unavailable":True}
 def _ads_sync(context):
  try:
-  repository=AdsPerformanceRepository();service=AdsManualSyncService(AdsSyncGateService(AdsSettings.from_environment(),repository,AdsLiveReadConfig.from_environment()),repository)
+  repository=_ads_repository();service=AdsManualSyncService(AdsSyncGateService(AdsSettings.from_environment(),repository,AdsLiveReadConfig.from_environment()),repository)
   return {**service.status(context.seller_id,context.marketplace_id),"unavailable":False}
  except Exception:return {"gate":{"allowed":False,"mode":None,"status_code":"error","status_message":"Ads sync unavailable."},"latest_sync":None,"unavailable":True}
 def _ads_sync_health(context):
  try:
-  repository=AdsPerformanceRepository();gate=AdsSyncGateService(AdsSettings.from_environment(),repository,AdsLiveReadConfig.from_environment());return {**AdsSyncObservabilityService(repository,gate).get(context.seller_id,context.marketplace_id).public_dict(),"unavailable":False}
+  repository=_ads_repository();gate=AdsSyncGateService(AdsSettings.from_environment(),repository,AdsLiveReadConfig.from_environment());return {**AdsSyncObservabilityService(repository,gate).get(context.seller_id,context.marketplace_id).public_dict(),"unavailable":False}
  except Exception:return {"health_status":"error","recent_runs":[],"unavailable":True}
 def _ads_historical_sync_health(context):
  try:
-  repository=AdsPerformanceRepository();settings=AdsSettings.from_environment();gate=AdsSyncGateService(settings,repository,AdsLiveReadConfig.from_environment());return {**AdsHistoricalSyncHealthService(repository,gate).get(context.seller_id,context.marketplace_id).public_dict(),"unavailable":False}
+  repository=_ads_repository();settings=AdsSettings.from_environment();gate=AdsSyncGateService(settings,repository,AdsLiveReadConfig.from_environment());return {**AdsHistoricalSyncHealthService(repository,gate).get(context.seller_id,context.marketplace_id).public_dict(),"unavailable":False}
  except Exception:return {"overall_status":"unavailable","recent_runs":[],"active_run":False,"cooldown_active":False,"cooldown_remaining_seconds":0,"unavailable":True}
 def _ads_scheduled_sync_health(context):
  try:
-  repository=AdsPerformanceRepository();readiness=AdsProductionReadinessService();return {**AdsScheduledSyncHealthService(AdsScheduledSyncConfig.from_environment(),readiness,repository,lambda:datetime.now(timezone.utc)).get(context.seller_id,context.marketplace_id).public_dict(),"unavailable":False}
+  repository=_ads_repository();readiness=AdsProductionReadinessService();return {**AdsScheduledSyncHealthService(AdsScheduledSyncConfig.from_environment(),readiness,repository,lambda:datetime.now(timezone.utc)).get(context.seller_id,context.marketplace_id).public_dict(),"unavailable":False}
  except Exception:return {"enabled":False,"status":"unavailable","unavailable":True}
 def _ads_intelligence(context, window=30):
  try:
-  repository=AdsPerformanceRepository();profile_id=AdsSettings.from_environment().profile_id
+  repository=_ads_repository();profile_id=AdsSettings.from_environment().profile_id
   return {**AdsIntelligenceService(repository).get(context.seller_id,context.marketplace_id,profile_id,window,5).public_dict(),"unavailable":False}
  except Exception:return {"summary":{"totals":{}},"trend":[],"top_campaigns":[],"weak_campaigns":[],"top_keywords":[],"weak_keywords":[],"profitable_search_terms":[],"wasted_search_terms":[],"recommendations":{"total":0,"by_code":{}},"decisions":{"pending":0,"approved":0,"rejected":0,"dismissed":0,"approved_is_not_executed":True},"sync_health":{"health_status":"unavailable"},"unavailable":True}
 def _ads_effectiveness(context):
  try:
-  repository=AdsPerformanceRepository();profile_id=AdsSettings.from_environment().profile_id
+  repository=_ads_repository();profile_id=AdsSettings.from_environment().profile_id
   return {**AdsRecommendationEffectivenessService(repository).get(context.seller_id,context.marketplace_id,profile_id,30).public_dict(),"unavailable":False}
  except Exception:return {"total_reviewed":0,"total_approved":0,"total_rejected":0,"total_dismissed":0,"approval_rate":None,"rejection_rate":None,"by_code":[],"repeated_rejection_codes":[],"high_approval_codes":[],"unavailable":True}
 def _ads_rule_tuning(context):
  try:
-  repo=AdsPerformanceRepository();profile=AdsSettings.from_environment().profile_id
+  repo=_ads_repository();profile=AdsSettings.from_environment().profile_id
   return {**AdsRuleTuningProposalService(repo,AdsRecommendationEffectivenessService(repo)).generate(context.seller_id,context.marketplace_id,profile),"unavailable":False}
  except Exception:return {"baseline":None,"proposals":[],"evaluation":{},"unavailable":True}
 def _ads_rule_versions(context):
  try:
   profile=getenv("AMAZON_ADS_PROFILE_ID")
   if not profile:return {"active":None,"versions":[],"unavailable":True}
-  return {**AdsRuleVersionViewService(AdsPerformanceRepository()).history(context.seller_id,context.marketplace_id,profile),"unavailable":False}
+  return {**AdsRuleVersionViewService(_ads_repository()).history(context.seller_id,context.marketplace_id,profile),"unavailable":False}
  except Exception:return {"active":None,"versions":[],"unavailable":True}
 def _recent_alerts(context):
  try:

@@ -29,12 +29,18 @@ class Client:
   for name in self.store:
    self.store[name].clear();self.store[name].update(candidate[name])
 class Table:
- def __init__(self,name,store,client):self.name=name;self.store=store[name];self.meta=SimpleNamespace(client=client)
+ def __init__(self,name,store,client):self.name=name;self.store=store[name];self.meta=SimpleNamespace(client=client);self.query_calls=[]
  def get_item(self,Key,**kwargs):return {"Item":deepcopy(self.store.get((Key["scope_key"],Key["run_key"])))} if (Key["scope_key"],Key["run_key"]) in self.store else {}
  def query(self,**kwargs):
-  values=kwargs["ExpressionAttributeValues"];scope=values[":scope"];prefix=values[":prefix"];sort="performance_key" if prefix=="PERF#" else "run_key"
-  rows=[deepcopy(value) for (pk,sk),value in self.store.items() if pk==scope and sk.startswith(prefix)]
-  rows.sort(key=lambda value:value[sort],reverse=not kwargs.get("ScanIndexForward",True));return {"Items":rows[:kwargs.get("Limit",len(rows))]}
+  self.query_calls.append(kwargs)
+  values=kwargs["ExpressionAttributeValues"];scope=values[":scope"];prefix=values.get(":prefix");sort="performance_key" if prefix=="PERF#" or ":start" in values else "run_key"
+  rows=[deepcopy(value) for (pk,sk),value in self.store.items() if pk==scope and (sk.startswith(prefix) if prefix else values[":start"]<=sk<=values[":end"])]
+  rows.sort(key=lambda value:value[sort],reverse=not kwargs.get("ScanIndexForward",True))
+  start=kwargs.get("ExclusiveStartKey")
+  if start:rows=rows[next(i+1 for i,row in enumerate(rows) if row[sort]==start[sort]):]
+  limit=min(kwargs.get("Limit",len(rows)),getattr(self,"page_size",len(rows)));page=rows[:limit];result={"Items":page}
+  if page and len(rows)>len(page):result["LastEvaluatedKey"]={"scope_key":scope,sort:page[-1][sort]}
+  return result
 class Resource:
  def __init__(self):
   self.store={"performance":{},"runs":{}};self.client=Client(self.store)

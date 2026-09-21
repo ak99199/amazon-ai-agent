@@ -1,6 +1,7 @@
 """Dedicated DynamoDB repository for historical Amazon Ads data only."""
-from datetime import date,datetime
+from datetime import date,datetime,timedelta
 from decimal import Decimal
+from app.amazon_ads.report_models import AdsPerformanceDaily
 from app.amazon_ads.sync_models import AdsManualSyncResult
 
 class AdsDynamoDbRepositoryError(RuntimeError):pass
@@ -54,6 +55,44 @@ class DynamoDbAdsHistoricalRepository:
         items=[self._performance_item(row) for row in rows];keys={(item["scope_key"],item["performance_key"]) for item in items}
         if len(keys)!=len(items):raise AdsDynamoDbRepositoryError("Amazon Ads performance batch contains duplicate logical rows.")
         self._transact([{"Put":{"TableName":self.performance_table_name,"Item":_encoded(item)}} for item in items]);return rows
+    def _query_performance(self,seller,marketplace,profile,start_date=None,end_date=None):
+        values={":scope":_scope(seller,marketplace,profile),":prefix":"PERF#"}
+        condition="scope_key = :scope AND begins_with(performance_key, :prefix)"
+        if start_date is not None:
+            values={":scope":values[":scope"],":start":f"PERF#{start_date.isoformat()}#",":end":f"PERF#{(end_date+timedelta(days=1)).isoformat()}"}
+            condition="scope_key = :scope AND performance_key BETWEEN :start AND :end"
+        start=None
+        while True:
+            args={"KeyConditionExpression":condition,"ExpressionAttributeValues":values,"ConsistentRead":True}
+            if start:args["ExclusiveStartKey"]=start
+            try:response=self.performance_table.query(**args)
+            except Exception:raise AdsDynamoDbRepositoryError("Amazon Ads persistent storage query failed.") from None
+            yield from response.get("Items",[])
+            start=response.get("LastEvaluatedKey")
+            if not start:break
+    def count_performance_rows(self,seller_id,marketplace_id,profile_id):
+        return sum(1 for _ in self._query_performance(seller_id,marketplace_id,profile_id))
+    def get_data_date_range(self,seller_id,marketplace_id,profile_id):
+        try:dates=[date.fromisoformat(item["date"]).isoformat() for item in self._query_performance(seller_id,marketplace_id,profile_id)]
+        except (KeyError,TypeError,ValueError):raise AdsDynamoDbRepositoryError("Amazon Ads stored performance data is invalid.") from None
+        return min(dates,default=None),max(dates,default=None)
+    def list_window(self,seller_id,marketplace_id,profile_id,days,reference_date=None,campaign_id=None,keyword_id=None,search_term=None):
+        if days not in (7,14,30,60,90):raise ValueError("Unsupported Ads query window")
+        end=reference_date or date.today();start=end-timedelta(days=days-1);rows=[]
+        filters={"campaign_id":campaign_id,"keyword_id":keyword_id,"search_term":search_term}
+        for item in self._query_performance(seller_id,marketplace_id,profile_id,start,end):
+            if any(value is not None and item.get(name)!=value for name,value in filters.items()):continue
+            try:
+                values={name:item[name] for name in AdsPerformanceDaily.__dataclass_fields__ if name in item}
+                values["date"]=date.fromisoformat(values["date"])
+                for name in ("impressions","clicks","orders","units"):values[name]=int(values.get(name,0))
+                for name in ("spend","sales"):
+                    values[name]=Decimal(values.get(name,0))
+                    if not values[name].is_finite():raise ValueError()
+                rows.append(AdsPerformanceDaily(**values))
+            except (KeyError,TypeError,ValueError,ArithmeticError):
+                raise AdsDynamoDbRepositoryError("Amazon Ads stored performance data is invalid.") from None
+        return sorted(rows,key=lambda row:(row.date,row.campaign_id or ""))
     def start_sync_run_if_idle(self,run,not_before):
         del not_before
         item=self._run_item(run);lock={**item,"run_key":"LOCK","history_run_key":item["run_key"]}
@@ -94,16 +133,30 @@ class DynamoDbAdsHistoricalRepository:
         except Exception as error:
             if self._conditional_failure(error):return False
             raise AdsDynamoDbRepositoryError("Amazon Ads persistent storage operation failed.") from None
-    def _query_runs(self,seller,marketplace,profile):
+    def _query_runs(self,seller,marketplace,profile,limit=1000):
         values={":scope":_scope(seller,marketplace,profile),":prefix":"RUN#"};items=[];start=None
-        while len(items)<1000:
+        while limit is None or len(items)<limit:
             args={"KeyConditionExpression":"scope_key = :scope AND begins_with(run_key, :prefix)","ExpressionAttributeValues":values,"ScanIndexForward":False,"ConsistentRead":True}
             if start:args["ExclusiveStartKey"]=start
             try:response=self.sync_runs_table.query(**args)
             except Exception:raise AdsDynamoDbRepositoryError("Amazon Ads persistent storage query failed.") from None
             items.extend(response.get("Items",[]));start=response.get("LastEvaluatedKey")
             if not start:break
-        return items[:1000]
+        return items if limit is None else items[:limit]
+    def count_ingestion_runs(self,seller_id,marketplace_id,profile_id,success=None):
+        return sum(1 for item in self._query_runs(seller_id,marketplace_id,profile_id,limit=None)
+                   if item.get("finished_at") and (success is None or bool(item.get("success"))==success))
+    def get_latest_ingestion_run(self,seller_id,marketplace_id,profile_id):
+        for item in self._query_runs(seller_id,marketplace_id,profile_id,limit=None):
+            if item.get("finished_at"):
+                try:run=self._run(item)
+                except (KeyError,TypeError,ValueError,ArithmeticError):raise AdsDynamoDbRepositoryError("Amazon Ads stored sync data is invalid.") from None
+                return {"run_id":run.sync_id,**run.public_dict()}
+        return None
+    def get_latest_successful_ingestion_run(self,seller_id,marketplace_id,profile_id):
+        try:run=self.latest_successful_sync(seller_id,marketplace_id,profile_id)
+        except (KeyError,TypeError,ValueError,ArithmeticError):raise AdsDynamoDbRepositoryError("Amazon Ads stored sync data is invalid.") from None
+        return {"run_id":run.sync_id,**run.public_dict()} if run else None
     def list_sync_runs(self,seller,marketplace,profile,limit=20,mode=None):
         result=[]
         for item in self._query_runs(seller,marketplace,profile):
