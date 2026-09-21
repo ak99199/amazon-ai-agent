@@ -34,7 +34,11 @@ class AmazonAdsClient:
             if len(content)>max_bytes:raise AdsDownloadLimitError(None,"Amazon Ads report download exceeded the safety limit")
         return bytes(content)
     def _request(self,method,path,params=None,json=None,profile_id=None):
-        url=f"{self._settings.require_auth().base_url}/{path.lstrip('/')}";headers=self.headers(profile_id);last_error=None
+        advertiser_query=method=="post" and path.lstrip("/")=="adsApi/v1/query/advertiserAccounts"
+        url=f"{self._settings.require_auth().base_url}/{path.lstrip('/')}";headers=self.headers(None if advertiser_query else profile_id);last_error=None
+        if advertiser_query:
+            headers["Amazon-Ads-ClientId"]=headers.pop("Amazon-Advertising-API-ClientId")
+            headers["Content-Type"]="application/json"
         for attempt in range(self._max_attempts):
             try:response=getattr(self._session,method)(url,params=params,json=json,headers=headers,timeout=self._timeout)
             except requests.Timeout:error=AdsApiClientError(None,"Amazon Ads request timed out",True)

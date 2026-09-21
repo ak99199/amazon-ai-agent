@@ -21,3 +21,22 @@ def test_non_retryable_error_is_normalized_and_redacted():
     assert error.value.status_code==403 and "secret" not in str(error.value).lower() and "token" not in str(error.value).lower()
 def test_post_is_explicitly_read_only():
     assert client([Response(200,{"reportId":"r"})]).post_read_only("reports",json={"date":"2026-01-01"},profile_id="profile-1")=={"reportId":"r"}
+
+def test_advertiser_query_uses_unified_headers_only_for_that_path():
+    session=Session([Response(200,{"advertiserAccounts":[]}),Response(200,{}),Response(200,[])])
+    urls=[]
+    original_post=session.post
+    def post(url,**kwargs):urls.append(url);return original_post(url,**kwargs)
+    session.post=post
+    value=AmazonAdsClient(AdsSettings("id","secret","refresh","profile-1","EU"),Auth(),session)
+    assert value.post_read_only("/adsApi/v1/query/advertiserAccounts",json={},profile_id="profile-1")=={"advertiserAccounts":[]}
+    assert urls[0]=="https://advertising-api-eu.amazon.com/adsApi/v1/query/advertiserAccounts"
+    unified=session.calls[0]
+    assert unified["json"]=={} and unified["headers"]=={"Amazon-Ads-ClientId":"id","Authorization":"Bearer hidden-token","Accept":"application/json","Content-Type":"application/json"}
+    assert value.post_read_only("/reporting/reports",json={},profile_id="profile-1")=={}
+    assert value.get("/v2/profiles")==[]
+    for standard in session.calls[1:]:
+        assert standard["headers"]["Amazon-Advertising-API-ClientId"]=="id"
+        assert "Amazon-Ads-ClientId" not in standard["headers"]
+    assert session.calls[1]["headers"]["Amazon-Advertising-API-Scope"]=="profile-1"
+    assert "Amazon-Advertising-API-Scope" not in session.calls[2]["headers"]

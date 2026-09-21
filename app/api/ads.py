@@ -22,7 +22,7 @@ from app.amazon_ads.write_intent_models import AdsWriteIntentBlockedError
 from app.services.ads_execution_safety_service import AdsExecutionSafetyConfigurationError
 from app.amazon_ads.config import AdsScheduledSyncConfig,AdsSettings
 from app.amazon_ads.auth import AdsLwaAuthenticator
-from app.amazon_ads.client import AmazonAdsClient
+from app.amazon_ads.client import AdsApiClientError, AmazonAdsClient
 from app.amazon_ads.profiles import AdsProfilesService
 from app.amazon_ads.read_adapters import SponsoredProductsReadAdapter
 from app.services.ads_live_read_service import AdsLiveReadService, AdsLiveReadBlockedError
@@ -621,6 +621,33 @@ def live_read_profiles():
         return {"status":live_read_status(),"profiles":[]}
     except Exception:
         raise HTTPException(503,"Live Ads read is unavailable") from None
+
+
+@router.get("/live-read/advertiser-accounts")
+def live_read_advertiser_accounts():
+    try:
+        settings=AdsSettings.from_environment()
+        status=AdsLiveReadService(settings).status(require_profile=False)
+        if not status.ready:return {"status":status.mode,"advertiserAccounts":[]}
+        payload=AmazonAdsClient(settings,AdsLwaAuthenticator(settings)).post_read_only("/adsApi/v1/query/advertiserAccounts",json={})
+        if not isinstance(payload,dict) or not isinstance(payload.get("advertiserAccounts"),list):raise ValueError()
+        accounts=[]
+        for account in payload["advertiserAccounts"]:
+            if not isinstance(account,dict) or not isinstance(account.get("alternateIds",[]),list):raise ValueError()
+            alternate_ids=[]
+            for alternate in account.get("alternateIds",[]):
+                if not isinstance(alternate,dict):raise ValueError()
+                identifiers={key:alternate.get(key) if isinstance(alternate.get(key),str) else None for key in ("countryCode","entityId","profileId")}
+                alternate_ids.append({**identifiers,"matchesConfiguredProfile":bool(settings.profile_id and identifiers["profileId"]==settings.profile_id)})
+            accounts.append({"advertiserAccountId":account.get("advertiserAccountId") if isinstance(account.get("advertiserAccountId"),str) else None,
+                             "displayName":account.get("displayName") if isinstance(account.get("displayName"),str) else None,
+                             "isGlobalAccount":account.get("isGlobalAccount") if isinstance(account.get("isGlobalAccount"),bool) else None,
+                             "alternateIds":alternate_ids})
+        return {"status":"ok","advertiserAccounts":accounts}
+    except AdsApiClientError as error:
+        return {"status":{401:"auth_error",403:"unsupported_or_not_entitled",404:"unsupported_or_not_entitled",429:"rate_limited"}.get(error.status_code,"unavailable"),"advertiserAccounts":[]}
+    except Exception:
+        return {"status":"unavailable","advertiserAccounts":[]}
 
 class SyncRequest(BaseModel):
     window_days: int = Field(default=7, ge=1, le=90)
