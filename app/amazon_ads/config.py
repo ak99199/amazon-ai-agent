@@ -9,6 +9,21 @@ class AdsSettings:
     @classmethod
     def from_environment(cls):
         region=(getenv("AMAZON_ADS_REGION") or "FE").upper()
+        secret_arn = (getenv("AMAZON_ADS_SECRET_ARN") or "").strip()
+        if secret_arn:
+            try:
+                import boto3
+                from app.aws.secrets import load_ads_secret
+                credentials = load_ads_secret(secret_arn, boto3.client("secretsmanager"))
+            except Exception:
+                raise AdsConfigurationError("Amazon Ads credentials are unavailable") from None
+            return cls(
+                credentials["AMAZON_ADS_CLIENT_ID"],
+                credentials["AMAZON_ADS_CLIENT_SECRET"],
+                credentials["AMAZON_ADS_REFRESH_TOKEN"],
+                getenv("AMAZON_ADS_PROFILE_ID") or None,
+                region,
+            )
         return cls(getenv("AMAZON_ADS_CLIENT_ID") or None,getenv("AMAZON_ADS_CLIENT_SECRET") or None,getenv("AMAZON_ADS_REFRESH_TOKEN") or None,getenv("AMAZON_ADS_PROFILE_ID") or None,region)
     @property
     def base_url(self):

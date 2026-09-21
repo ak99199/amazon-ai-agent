@@ -586,10 +586,10 @@ def sealed_write_commands(status:str|None=Query(None),limit:int=Query(50,ge=1,le
     except Exception:raise HTTPException(503,"Sealed-command history is unavailable") from None
 
 
-def _live_read_service():
+def _live_read_service(require_profile=True):
     settings=AdsSettings.from_environment()
     service=AdsLiveReadService(settings)
-    if not service.status().ready:
+    if not service.status(require_profile=require_profile).ready:
         return service
     client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings))
     return AdsLiveReadService(settings,AdsProfilesService(client),SponsoredProductsReadAdapter(client))
@@ -606,10 +606,17 @@ def live_read_status():
 @router.get("/live-read/profiles")
 def live_read_profiles():
     try:
-        service=_live_read_service(); status=service.status()
+        service = _live_read_service(require_profile=False)
+        status = service.status(require_profile=False)
         if not status.ready:
             return {"status":status.public_dict(),"profiles":[]}
-        return {"status":status.public_dict(),"profiles":[profile.public_dict() for profile in service.discover_profiles()]}
+        profiles = service.discover_profiles()
+        return {
+            "status": status.public_dict(),
+            "profiles": [profile.public_dict() for profile in profiles],
+            "india_profile_ids": [profile.profile_id for profile in AdsProfilesService.india_profiles(profiles)],
+            "profile_selection_required": not status.profile_selected,
+        }
     except AdsLiveReadBlockedError:
         return {"status":live_read_status(),"profiles":[]}
     except Exception:
