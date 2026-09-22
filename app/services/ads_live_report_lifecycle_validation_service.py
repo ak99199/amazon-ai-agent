@@ -32,7 +32,7 @@ class AdsLiveReportLifecycleValidationService:
     return self._result("success",started,ready,start,end,True,True,attempt,last,True,True,"Historical report lifecycle completed; content was not downloaded.")
    if last in ("failed","cancelled"):return self._result("report_failed",started,ready,start,end,True,True,attempt,last,True,False,"Historical report reached a terminal failure state.")
    if last=="unknown":return self._result("validation_error",started,ready,start,end,True,True,attempt,last,True,False,"Amazon Ads returned an unknown report status.")
-   if attempt<self.max_polls:self.sleeper(1)
+   if attempt<self.max_polls:self.sleeper(4)
   return self._result("poll_timeout",started,ready,start,end,True,True,self.max_polls,last,False,False,"Historical report is still processing after bounded polling.")
  @staticmethod
  def _definition(request,today):

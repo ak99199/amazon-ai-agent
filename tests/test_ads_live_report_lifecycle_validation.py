@@ -41,10 +41,10 @@ def test_request_is_server_selected_bounded_historical_campaign_report_and_creat
  assert result.report_id_present and result.download_ready and transport.downloads==[] and "signed" not in str(result.public_dict())
 @pytest.mark.parametrize("statuses,expected,terminal",[(('pending','completed'),"success",True),(('processing','completed'),"success",True),(('failed',),"report_failed",True),(('cancelled',),"report_failed",True),(('unknown',),"validation_error",True)])
 def test_status_lifecycle_is_normalized(statuses,expected,terminal):
- delays=[];result,transport,_=run(Transport(statuses),sleeper=delays.append);assert result.status==expected and result.terminal is terminal and len(transport.polls)==len(statuses) and transport.downloads==[] and delays==([1] if len(statuses)==2 else [])
+ delays=[];result,transport,_=run(Transport(statuses),sleeper=delays.append);assert result.status==expected and result.terminal is terminal and len(transport.polls)==len(statuses) and transport.downloads==[] and delays==([4] if len(statuses)==2 else [])
 @pytest.mark.parametrize("max_polls",(3,5))
 def test_poll_limit_is_exact_and_does_not_download(max_polls):
- delays=[];result,transport,_=run(Transport(("processing",)*9),max_polls=max_polls,sleeper=delays.append);assert result.status=="poll_timeout" and result.poll_attempts==max_polls and len(transport.polls)==max_polls and transport.downloads==[] and delays==[1]*(max_polls-1)
+ delays=[];result,transport,_=run(Transport(("processing",)*9),max_polls=max_polls,sleeper=delays.append);assert result.status=="poll_timeout" and result.poll_attempts==max_polls and len(transport.polls)==max_polls and transport.downloads==[] and delays==[4]*(max_polls-1)
 @pytest.mark.parametrize("error,expected",[(AdsApiClientError(401,"raw Authorization"),"auth_error"),(AdsApiClientError(403,"raw refresh_token"),"auth_error"),(AdsApiClientError(429,"raw"),"rate_limited"),(AdsApiClientError(500,"raw"),"remote_error"),(TimeoutError("raw"),"remote_error")])
 def test_creation_errors_are_safe(error,expected):
  result,_,_=run(Transport(create_error=error));assert result.status==expected and "raw" not in str(result.public_dict())
