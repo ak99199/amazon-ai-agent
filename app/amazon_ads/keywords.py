@@ -3,11 +3,20 @@ from decimal import Decimal,InvalidOperation
 from app.amazon_ads.ingestion_models import AdsKeyword
 class SponsoredProductsKeywordsService:
     def __init__(self,client):self._client=client
-    def list_keywords(self,profile_id,max_pages=10):return self._list(profile_id,"/sp/keywords","keyword",max_pages)
-    def list_targets(self,profile_id,max_pages=10):return self._list(profile_id,"/sp/targets","target",max_pages)
+    def list_keywords(self,profile_id,max_pages=10):return self._list(profile_id,"/sp/keywords/list","keyword",max_pages)
+    def list_targets(self,profile_id,max_pages=10):return self._list(profile_id,"/sp/targets/list","target",max_pages)
     def _list(self,profile_id,path,kind,max_pages):
         if not 1<=max_pages<=100:raise ValueError("Keyword page limit is invalid")
-        payload=self._client.get_profile_scoped(path,params={"maxPages":max_pages},profile_id=profile_id);items=payload if isinstance(payload,list) else payload.get(f"{kind}s",[]) if isinstance(payload,dict) else []
+        key,media_type=("keywords","application/vnd.spKeyword.v3+json") if kind=="keyword" else ("targetingClauses","application/vnd.spTargetingClause.v3+json")
+        items=[];cursor=None
+        for _ in range(max_pages):
+            body={"maxResults":100}
+            if cursor:body["nextToken"]=cursor
+            payload=self._client.post_read_only(path,json=body,profile_id=profile_id,media_type=media_type)
+            page=payload if isinstance(payload,list) else payload.get(key,[]) if isinstance(payload,dict) else []
+            items.extend(page if isinstance(page,list) else [])
+            cursor=payload.get("nextToken") if isinstance(payload,dict) else None
+            if not cursor:break
         return [self._normalize(profile_id,item,kind) for item in items if isinstance(item,dict)]
     @staticmethod
     def _normalize(profile_id,row,kind):

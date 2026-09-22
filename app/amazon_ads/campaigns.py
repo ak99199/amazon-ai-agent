@@ -6,7 +6,15 @@ class SponsoredProductsCampaignsService:
     def __init__(self,client):self._client=client
     def list_campaigns(self,profile_id,max_pages=10):
         if not 1<=max_pages<=100:raise ValueError("Campaign page limit is invalid")
-        payload=self._client.get_profile_scoped("/sp/campaigns",params={"maxPages":max_pages},profile_id=profile_id);items=payload if isinstance(payload,list) else payload.get("campaigns",[]) if isinstance(payload,dict) else []
+        items=[];cursor=None
+        for _ in range(max_pages):
+            body={"maxResults":100}
+            if cursor:body["nextToken"]=cursor
+            payload=self._client.post_read_only("/sp/campaigns/list",json=body,profile_id=profile_id,media_type="application/vnd.spCampaign.v3+json")
+            page=payload if isinstance(payload,list) else payload.get("campaigns",[]) if isinstance(payload,dict) else []
+            items.extend(page if isinstance(page,list) else [])
+            cursor=payload.get("nextToken") if isinstance(payload,dict) else None
+            if not cursor:break
         return [self._normalize(profile_id,item) for item in items if isinstance(item,dict)]
     @staticmethod
     def _normalize(profile_id,row):
