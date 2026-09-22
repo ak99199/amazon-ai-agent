@@ -10,10 +10,11 @@ class SponsoredProductsCampaignsService:
         return [self._normalize(profile_id,item) for item in items if isinstance(item,dict)]
     @staticmethod
     def _normalize(profile_id,row):
-        amount=row.get("dailyBudget")
+        nested=row.get("budget") if isinstance(row.get("budget"),dict) else {}
+        amount=nested.get("budget") if "budget" in row else row.get("dailyBudget")
         try:budget=Decimal(str(amount)) if amount is not None else None
         except (InvalidOperation,ValueError):budget=None
         parse_date=lambda value:date.fromisoformat(value[:10]) if isinstance(value,str) else None
         campaign_id=row.get("campaignId")
         if campaign_id is None:raise ValueError("Campaign row is invalid")
-        return AdsCampaign(str(profile_id),str(campaign_id),row.get("name") or row.get("campaignName"),row.get("state") or row.get("status"),budget,row.get("budgetType"),row.get("targetingType"),parse_date(row.get("startDate")),parse_date(row.get("endDate")),str(row["portfolioId"]) if row.get("portfolioId") is not None else None)
+        return AdsCampaign(str(profile_id),str(campaign_id),row.get("name") or row.get("campaignName"),row.get("state") or row.get("status"),budget,nested.get("budgetType") if "budget" in row else row.get("budgetType"),row.get("targetingType"),parse_date(row.get("startDate")),parse_date(row.get("endDate")),str(row["portfolioId"]) if row.get("portfolioId") is not None else None)

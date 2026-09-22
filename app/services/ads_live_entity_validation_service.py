@@ -43,8 +43,13 @@ class AdsLiveEntityValidationService:
  def _validate_campaign(row,item):
   if not item.campaign_id:raise ValueError("invalid campaign")
   if item.state is not None and str(item.state).lower() not in ("enabled","paused","archived"):raise ValueError("invalid state")
-  if row.get("dailyBudget") is not None:
-   amount=Decimal(str(row["dailyBudget"]));
+  if "budget" in row:
+   nested=row["budget"]
+   if not isinstance(nested,dict) or nested.get("budget") is None:raise ValueError("invalid budget")
+   amount=nested["budget"]
+  else:amount=row.get("dailyBudget")
+  if amount is not None:
+   amount=Decimal(str(amount))
    if not amount.is_finite() or amount<0:raise ValueError("invalid budget")
   for name in ("startDate","endDate"):
    if row.get(name) is not None:date.fromisoformat(str(row[name])[:10])

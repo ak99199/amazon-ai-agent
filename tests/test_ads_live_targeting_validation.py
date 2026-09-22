@@ -111,16 +111,16 @@ def test_configured_profile_is_never_auto_selected_when_missing():
     assert adapter.calls == []
 
 
-def test_real_adapter_uses_one_get_per_entity_and_clamps_returned_rows():
+def test_real_adapter_uses_one_v3_list_per_entity_and_clamps_returned_rows():
     from app.amazon_ads.read_adapters import SponsoredProductsReadAdapter
 
     class Client:
         def __init__(self):
             self.calls = []
 
-        def get_profile_scoped(self, path, params, profile_id):
-            self.calls.append((path, params, profile_id))
-            key = {"/sp/campaigns": "campaigns", "/sp/adGroups": "adGroups", "/sp/keywords": "keywords", "/sp/targets": "targets"}[path]
+        def post_read_only(self, path, json, profile_id, media_type):
+            self.calls.append((path, json, profile_id, media_type))
+            key = {"/sp/campaigns/list": "campaigns", "/sp/adGroups/list": "adGroups", "/sp/keywords/list": "keywords", "/sp/targets/list": "targetingClauses"}[path]
             return {key: list(range(100)), "nextToken": "must-not-be-followed"}
 
     client = Client()
@@ -129,8 +129,12 @@ def test_real_adapter_uses_one_get_per_entity_and_clamps_returned_rows():
     assert len(adapter.first_ad_group_page("p", 99)) == 20
     assert len(adapter.first_keyword_page("p", 99)) == 25
     assert len(adapter.first_target_page("p", 99)) == 25
-    assert [call[1]["maxResults"] for call in client.calls] == [10, 20, 25, 25]
-    assert len(client.calls) == 4
+    assert client.calls == [
+        ("/sp/campaigns/list", {"maxResults": 10}, "p", "application/vnd.spCampaign.v3+json"),
+        ("/sp/adGroups/list", {"maxResults": 20}, "p", "application/vnd.spAdGroup.v3+json"),
+        ("/sp/keywords/list", {"maxResults": 25}, "p", "application/vnd.spKeyword.v3+json"),
+        ("/sp/targets/list", {"maxResults": 25}, "p", "application/vnd.spTargetingClause.v3+json"),
+    ]
 
 
 def test_valid_entities_are_read_once_in_order_with_fixed_bounds():

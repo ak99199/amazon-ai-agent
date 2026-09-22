@@ -52,6 +52,11 @@ def test_malformed_duplicate_budget_state_and_date_rows_are_isolated():
  factory,_=dependencies([matched()],rows);result=AdsLiveEntityValidationService(readiness(),factory,now=lambda:NOW).run(True)
  assert result.status=="success" and result.campaigns=={"records_received":6,"records_valid":1,"records_invalid":4,"duplicate_count":1,"bounded":True}
 
+def test_v3_nested_campaign_budget_validation_keeps_malformed_values_invalid():
+ rows=[{"campaignId":"1","budget":{"budget":10,"budgetType":"DAILY"}},{"campaignId":"2","budget":{"budget":"NaN"}},{"campaignId":"3","budget":{"budget":"Infinity"}},{"campaignId":"4","budget":{"budget":-1}},{"campaignId":"5","budget":{}}]
+ factory,_=dependencies([matched()],rows);result=AdsLiveEntityValidationService(readiness(),factory,now=lambda:NOW).run(True)
+ assert result.campaigns=={"records_received":5,"records_valid":1,"records_invalid":4,"duplicate_count":0,"bounded":True}
+
 def test_fe_non_india_profile_returns_warning_without_autocorrection():
  factory,_=dependencies([matched("US")],[]);result=AdsLiveEntityValidationService(readiness(),factory,now=lambda:NOW).run(True);assert result.status=="valid_empty" and result.warnings
 

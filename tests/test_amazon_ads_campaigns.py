@@ -5,5 +5,8 @@ class Client:
 def test_campaigns_are_normalized_and_scoped():
  c=Client([{"campaignId":1,"name":"Name","dailyBudget":"10.50"},{"campaignId":2}]);rows=SponsoredProductsCampaignsService(c).list_campaigns("profile",2)
  assert len(rows)==2 and rows[0].campaign_id=="1" and str(rows[0].daily_budget)=="10.50" and c.calls[0][1]["profile_id"]=="profile"
+def test_v3_nested_campaign_budget_is_normalized_without_changing_legacy_reader():
+ row=SponsoredProductsCampaignsService._normalize("profile",{"campaignId":"1","budget":{"budget":15,"budgetType":"DAILY"}})
+ assert row.daily_budget==15 and row.budget_type=="DAILY"
 def test_campaign_service_has_no_mutations():
  value=SponsoredProductsCampaignsService(Client([]));assert not any(hasattr(value,name) for name in ("create_campaign","update_campaign","archive_campaign","change_budget"))

@@ -27,9 +27,9 @@ def test_success_is_bounded_and_contains_no_sensitive_values():
 def test_smoke_campaign_adapter_is_one_small_profile_scoped_page():
  class Client:
   def __init__(self):self.calls=[]
-  def get_profile_scoped(self,path,params=None,profile_id=None):self.calls.append((path,params,profile_id));return {"campaigns":[]}
+  def post_read_only(self,path,json=None,profile_id=None,media_type=None):self.calls.append((path,json,profile_id,media_type));return {"campaigns":[]}
  client=Client();SponsoredProductsReadAdapter(client,max_pages=1,page_size=5).campaigns("profile")
- assert client.calls==[("/sp/campaigns",{"maxResults":5},"profile")]
+ assert client.calls==[("/sp/campaigns/list",{"maxResults":5},"profile","application/vnd.spCampaign.v3+json")]
 
 @pytest.mark.parametrize("status,expected",[(401,"auth_error"),(403,"auth_error"),(429,"rate_limited"),(500,"remote_error")])
 def test_http_errors_are_classified_safely(status,expected):

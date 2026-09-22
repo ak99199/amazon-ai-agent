@@ -22,6 +22,14 @@ def test_non_retryable_error_is_normalized_and_redacted():
 def test_post_is_explicitly_read_only():
     assert client([Response(200,{"reportId":"r"})]).post_read_only("reports",json={"date":"2026-01-01"},profile_id="profile-1")=={"reportId":"r"}
 
+@pytest.mark.parametrize("resource",("spCampaign","spAdGroup","spKeyword","spTargetingClause"))
+def test_v3_list_media_type_preserves_standard_ads_headers(resource):
+    value=client([Response(200,{})]);media_type=f"application/vnd.{resource}.v3+json"
+    value.post_read_only("/sp/campaigns/list",json={"maxResults":10},profile_id="profile-1",media_type=media_type)
+    request=value._session.calls[0]
+    assert request["json"]=={"maxResults":10}
+    assert request["headers"]=={"Amazon-Advertising-API-ClientId":"id","Authorization":"Bearer hidden-token","Amazon-Advertising-API-Scope":"profile-1","Accept":media_type,"Content-Type":media_type}
+
 def test_advertiser_query_uses_unified_headers_only_for_that_path():
     session=Session([Response(200,{"advertiserAccounts":[]}),Response(200,{}),Response(200,[])])
     urls=[]

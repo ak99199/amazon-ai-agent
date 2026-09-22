@@ -15,9 +15,9 @@ class AmazonAdsClient:
     def get(self,path,params=None,profile_id=None):return self._request("get",path,params=params,profile_id=profile_id)
     def get_profile_scoped(self,path,params=None,profile_id=None):
         profile_id=profile_id or self._settings.require_profile_api().profile_id;return self.get(path,params,profile_id)
-    def post_read_only(self,path,json=None,params=None,profile_id=None):
+    def post_read_only(self,path,json=None,params=None,profile_id=None,media_type=None):
         """For read/report creation operations only; campaign mutation methods are absent."""
-        return self._request("post",path,params=params,json=json,profile_id=profile_id)
+        return self._request("post",path,params=params,json=json,profile_id=profile_id,media_type=media_type)
     def download_signed(self,url,max_bytes):
         """Download a signed report location without Ads authorization headers."""
         try:response=self._session.get(url,timeout=self._timeout,stream=True)
@@ -33,12 +33,13 @@ class AmazonAdsClient:
             content.extend(chunk)
             if len(content)>max_bytes:raise AdsDownloadLimitError(None,"Amazon Ads report download exceeded the safety limit")
         return bytes(content)
-    def _request(self,method,path,params=None,json=None,profile_id=None):
+    def _request(self,method,path,params=None,json=None,profile_id=None,media_type=None):
         advertiser_query=method=="post" and path.lstrip("/")=="adsApi/v1/query/advertiserAccounts"
         url=f"{self._settings.require_auth().base_url}/{path.lstrip('/')}";headers=self.headers(None if advertiser_query else profile_id);last_error=None
         if advertiser_query:
             headers["Amazon-Ads-ClientId"]=headers.pop("Amazon-Advertising-API-ClientId")
             headers["Content-Type"]="application/json"
+        if media_type:headers.update({"Accept":media_type,"Content-Type":media_type})
         for attempt in range(self._max_attempts):
             try:response=getattr(self._session,method)(url,params=params,json=json,headers=headers,timeout=self._timeout)
             except requests.Timeout:error=AdsApiClientError(None,"Amazon Ads request timed out",True)
