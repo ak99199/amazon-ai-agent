@@ -12,7 +12,7 @@ from app.services.ads_production_readiness_service import AdsProductionReadiness
 
 NOW=datetime(2026,2,10,12,tzinfo=timezone.utc)
 def readiness(approval="approved",settings=None,config=None):return AdsProductionReadinessService(settings or AdsSettings("id","secret","refresh","profile","FE"),config or AdsLiveReadConfig(True,False),approval)
-def row(**changes):return {"date":"2026-02-08","campaignId":"c1","impressions":"10","clicks":"2","cost":"1.25","purchases14d":"1","unitsSold14d":"1","sales14d":"4.50"}|changes
+def row(**changes):return {"date":"2026-02-08","campaignId":"c1","impressions":"10","clicks":"2","cost":"1.25","purchases14d":"1","unitsSoldClicks14d":"1","sales14d":"4.50"}|changes
 class Transport:
  def __init__(self,statuses=("completed",),rows=None,error=None):self.statuses=list(statuses);self.rows=[] if rows is None else rows;self.error=error;self.creates=[];self.polls=[];self.downloads=[]
  def create(self,profile,definition):self.creates.append((profile,definition));return "report"
@@ -24,7 +24,7 @@ class Transport:
 def run(transport=None,ready=None,confirm=True,max_polls=5,row_limit=100):
  transport=transport or Transport(rows=[row()]);calls=[];reporting=SponsoredProductsReportingService()
  def factory():calls.append(True);return transport,reporting
- lifecycle=AdsLiveReportLifecycleValidationService(ready or readiness(),factory,now=lambda:NOW,max_polls=max_polls)
+ lifecycle=AdsLiveReportLifecycleValidationService(ready or readiness(),factory,now=lambda:NOW,max_polls=max_polls,sleeper=lambda _:None)
  return AdsLiveReportDownloadValidationService(lifecycle,reporting,row_limit=row_limit).run(confirm),transport,calls
 
 @pytest.mark.parametrize("ready",[readiness("pending"),readiness("rejected"),readiness(config=AdsLiveReadConfig(False,False)),readiness(config=AdsLiveReadConfig(True,True)),readiness(settings=AdsSettings(None,"secret","refresh","profile","FE")),readiness(settings=AdsSettings("id","secret","refresh",None,"FE")),readiness(settings=AdsSettings("id","secret","refresh","profile","XX"))])
@@ -35,7 +35,7 @@ def test_confirmation_false_makes_zero_dependency_and_download_calls():
 def test_completed_lifecycle_creates_once_downloads_once_and_validates():
  result,transport,_=run();assert result.status=="success" and len(transport.creates)==1 and len(transport.downloads)==1 and result.rows_valid==1 and result.rows_invalid==0
  assert "signed" not in str(result.public_dict()) and "c1" not in str(result.public_dict())
-@pytest.mark.parametrize("statuses,expected",[(('processing','processing'),"poll_timeout"),(('failed',),"report_failed"),(('cancelled',),"report_failed"),(('unknown',),"validation_error")])
+@pytest.mark.parametrize("statuses,expected",[(('pending','pending'),"poll_timeout"),(('processing','processing'),"poll_timeout"),(('failed',),"report_failed"),(('cancelled',),"report_failed"),(('unknown',),"validation_error")])
 def test_noncompleted_lifecycle_never_downloads(statuses,expected):
  result,transport,_=run(Transport(statuses,rows=[row()]),max_polls=len(statuses));assert result.status==expected and transport.downloads==[]
 @pytest.mark.parametrize("error,expected",[(AdsReportDownloadError("raw"),"download_error"),(AdsReportDecompressionError("raw"),"decompression_error"),(AdsReportParseError("raw"),"parse_error"),(TimeoutError("raw"),"remote_error")])
@@ -47,6 +47,10 @@ def test_empty_report_is_valid_and_large_report_is_truncated():
 def test_malformed_numeric_date_and_duplicate_grain_rows_are_isolated():
  rows=[row(),row(campaignId="c2",cost="NaN"),row(campaignId="c3",sales14d="Infinity"),row(campaignId="c4",clicks="1.5"),row(campaignId="c5",cost="bad"),row(campaignId="c6",impressions="-1"),row(campaignId="c7",date="2026-02-07"),row()]
  result,_,_=run(Transport(rows=rows));assert result.status=="partial_valid" and result.rows_valid==1 and result.rows_invalid==7
+def test_v3_units_are_validated_and_legacy_units_remain_accepted():
+ legacy=row(campaignId="legacy");legacy["unitsSold14d"]=legacy.pop("unitsSoldClicks14d")
+ rows=[row(),legacy,row(campaignId="negative",unitsSoldClicks14d="-1"),row(campaignId="nan",unitsSoldClicks14d="NaN"),row(campaignId="infinite",unitsSoldClicks14d="Infinity")]
+ result,_,_=run(Transport(rows=rows));assert result.status=="partial_valid" and result.rows_valid==2 and result.rows_invalid==3
 
 class DownloadClient:
  def __init__(self,payload):self.payload=payload;self.calls=[]

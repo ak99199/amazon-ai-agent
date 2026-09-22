@@ -1,12 +1,13 @@
 """Manual, bounded Amazon Ads report-job lifecycle validation without download."""
 from datetime import datetime,timedelta,timezone
+from time import sleep
 from app.amazon_ads.client import AdsApiClientError
 from app.amazon_ads.report_transport import AdsReportTransportError
 from app.amazon_ads.live_models import AdsLiveReportLifecycleValidationResult
 
 class AdsLiveReportLifecycleValidationService:
  def __init__(self,readiness_service,dependency_factory,now=None,max_polls=5,sleeper=None):
-  self.readiness_service=readiness_service;self.dependency_factory=dependency_factory;self.now=now or (lambda:datetime.now(timezone.utc));self.max_polls=max(1,min(int(max_polls),5));self.sleeper=sleeper or (lambda _:None)
+  self.readiness_service=readiness_service;self.dependency_factory=dependency_factory;self.now=now or (lambda:datetime.now(timezone.utc));self.max_polls=max(1,min(int(max_polls),5));self.sleeper=sleeper or sleep
  def run(self,confirm_live_read=False):
   return self.run_with_completed(confirm_live_read)
  def run_with_completed(self,confirm_live_read=False,on_completed=None):
@@ -31,7 +32,7 @@ class AdsLiveReportLifecycleValidationService:
     return self._result("success",started,ready,start,end,True,True,attempt,last,True,True,"Historical report lifecycle completed; content was not downloaded.")
    if last in ("failed","cancelled"):return self._result("report_failed",started,ready,start,end,True,True,attempt,last,True,False,"Historical report reached a terminal failure state.")
    if last=="unknown":return self._result("validation_error",started,ready,start,end,True,True,attempt,last,True,False,"Amazon Ads returned an unknown report status.")
-   if attempt<self.max_polls:self.sleeper(0)
+   if attempt<self.max_polls:self.sleeper(1)
   return self._result("poll_timeout",started,ready,start,end,True,True,self.max_polls,last,False,False,"Historical report is still processing after bounded polling.")
  @staticmethod
  def _definition(request,today):

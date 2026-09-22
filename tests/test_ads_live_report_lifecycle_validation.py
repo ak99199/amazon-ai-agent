@@ -22,10 +22,10 @@ class Transport:
   if self.status_error:raise self.status_error
   return AdsLiveReportStatus(report_id,self.statuses.pop(0) if self.statuses else "processing","https://signed-secret")
  def download_rows(self,*args):self.downloads.append(args);raise AssertionError("download forbidden")
-def run(transport=None,ready=None,confirm=True,max_polls=5,reporting=None):
+def run(transport=None,ready=None,confirm=True,max_polls=5,reporting=None,sleeper=None):
  transport=transport or Transport();calls=[]
  def factory():calls.append(True);return transport,reporting or SponsoredProductsReportingService()
- result=AdsLiveReportLifecycleValidationService(ready or readiness(),factory,now=lambda:NOW,max_polls=max_polls).run(confirm)
+ result=AdsLiveReportLifecycleValidationService(ready or readiness(),factory,now=lambda:NOW,max_polls=max_polls,sleeper=sleeper or (lambda _:None)).run(confirm)
  return result,transport,calls
 
 @pytest.mark.parametrize("ready",[readiness("pending"),readiness("rejected"),readiness(config=AdsLiveReadConfig(False,False)),readiness(config=AdsLiveReadConfig(True,True)),readiness(settings=AdsSettings(None,"secret","refresh","profile","FE")),readiness(settings=AdsSettings("id","secret","refresh",None,"FE")),readiness(settings=AdsSettings("id","secret","refresh","profile","XX"))])
@@ -41,9 +41,10 @@ def test_request_is_server_selected_bounded_historical_campaign_report_and_creat
  assert result.report_id_present and result.download_ready and transport.downloads==[] and "signed" not in str(result.public_dict())
 @pytest.mark.parametrize("statuses,expected,terminal",[(('pending','completed'),"success",True),(('processing','completed'),"success",True),(('failed',),"report_failed",True),(('cancelled',),"report_failed",True),(('unknown',),"validation_error",True)])
 def test_status_lifecycle_is_normalized(statuses,expected,terminal):
- result,transport,_=run(Transport(statuses));assert result.status==expected and result.terminal is terminal and len(transport.polls)==len(statuses) and transport.downloads==[]
-def test_poll_limit_is_exact_and_does_not_download():
- result,transport,_=run(Transport(("processing",)*9),max_polls=3);assert result.status=="poll_timeout" and result.poll_attempts==3 and len(transport.polls)==3 and transport.downloads==[]
+ delays=[];result,transport,_=run(Transport(statuses),sleeper=delays.append);assert result.status==expected and result.terminal is terminal and len(transport.polls)==len(statuses) and transport.downloads==[] and delays==([1] if len(statuses)==2 else [])
+@pytest.mark.parametrize("max_polls",(3,5))
+def test_poll_limit_is_exact_and_does_not_download(max_polls):
+ delays=[];result,transport,_=run(Transport(("processing",)*9),max_polls=max_polls,sleeper=delays.append);assert result.status=="poll_timeout" and result.poll_attempts==max_polls and len(transport.polls)==max_polls and transport.downloads==[] and delays==[1]*(max_polls-1)
 @pytest.mark.parametrize("error,expected",[(AdsApiClientError(401,"raw Authorization"),"auth_error"),(AdsApiClientError(403,"raw refresh_token"),"auth_error"),(AdsApiClientError(429,"raw"),"rate_limited"),(AdsApiClientError(500,"raw"),"remote_error"),(TimeoutError("raw"),"remote_error")])
 def test_creation_errors_are_safe(error,expected):
  result,_,_=run(Transport(create_error=error));assert result.status==expected and "raw" not in str(result.public_dict())

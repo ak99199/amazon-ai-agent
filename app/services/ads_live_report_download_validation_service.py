@@ -37,7 +37,8 @@ class AdsLiveReportDownloadValidationService:
   if not isinstance(row,dict) or not row.get("campaignId") or "date" not in row:raise ValueError("invalid campaign row")
   value=date.fromisoformat(str(row["date"])[:10])
   if value<start or value>end:raise ValueError("report date outside requested window")
-  for field in ("impressions","clicks","purchases14d","unitsSold14d"):
+  units_field="unitsSoldClicks14d" if "unitsSoldClicks14d" in row else "unitsSold14d"
+  for field in ("impressions","clicks","purchases14d",units_field):
    number=AdsLiveReportDownloadValidationService._number(row,field)
    if number!=number.to_integral_value():raise ValueError("invalid count")
   for field in ("cost","sales14d"):AdsLiveReportDownloadValidationService._number(row,field)
