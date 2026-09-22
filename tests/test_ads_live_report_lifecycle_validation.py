@@ -37,7 +37,7 @@ def test_request_is_server_selected_bounded_historical_campaign_report_and_creat
  result,transport,_=run();definition=transport.creates[0][1]
  assert result.status=="success" and result.start_date=="2026-02-08" and result.end_date=="2026-02-09"
  assert len(transport.creates)==1 and definition["configuration"]["reportTypeId"]=="spCampaigns" and definition["configuration"]["timeUnit"]=="DAILY"
- assert definition["configuration"]["groupBy"]==["campaign"] and {"date","campaignId"}<=set(definition["configuration"]["columns"])
+ assert definition["configuration"]["groupBy"]==["campaign"] and "unitsSoldClicks14d" in definition["configuration"]["columns"] and "unitsSold14d" not in definition["configuration"]["columns"]
  assert result.report_id_present and result.download_ready and transport.downloads==[] and "signed" not in str(result.public_dict())
 @pytest.mark.parametrize("statuses,expected,terminal",[(('pending','completed'),"success",True),(('processing','completed'),"success",True),(('failed',),"report_failed",True),(('cancelled',),"report_failed",True),(('unknown',),"validation_error",True)])
 def test_status_lifecycle_is_normalized(statuses,expected,terminal):

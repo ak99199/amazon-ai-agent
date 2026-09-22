@@ -13,8 +13,8 @@ class AmazonAdsClient:
         if profile_id:headers["Amazon-Advertising-API-Scope"]=str(profile_id)
         return headers
     def get(self,path,params=None,profile_id=None):return self._request("get",path,params=params,profile_id=profile_id)
-    def get_profile_scoped(self,path,params=None,profile_id=None):
-        profile_id=profile_id or self._settings.require_profile_api().profile_id;return self.get(path,params,profile_id)
+    def get_profile_scoped(self,path,params=None,profile_id=None,media_type=None):
+        profile_id=profile_id or self._settings.require_profile_api().profile_id;return self._request("get",path,params=params,profile_id=profile_id,media_type=media_type)
     def post_read_only(self,path,json=None,params=None,profile_id=None,media_type=None):
         """For read/report creation operations only; campaign mutation methods are absent."""
         return self._request("post",path,params=params,json=json,profile_id=profile_id,media_type=media_type)

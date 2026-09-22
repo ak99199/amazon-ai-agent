@@ -13,7 +13,11 @@ class Session:
     def post(self,*args,**kwargs):self.calls.append(kwargs);return next(self.responses)
 def client(responses):return AmazonAdsClient(AdsSettings("id","secret","refresh","profile-1","FE"),Auth(),Session(responses))
 def test_headers_scope_and_read_only_surface():
-    value=client([Response(200,{})]);assert value.headers()["Amazon-Advertising-API-ClientId"]=="id" and value.headers()["Authorization"]=="Bearer hidden-token" and "Amazon-Advertising-API-Scope" not in value.headers();assert value.headers("profile-1")["Amazon-Advertising-API-Scope"]=="profile-1";assert value.get_profile_scoped("campaigns") == {};assert value._session.calls[0]["headers"]["Amazon-Advertising-API-Scope"]=="profile-1";assert not any(hasattr(value,name) for name in ("put","patch","delete"))
+    value=client([Response(200,{})]);assert value.headers()["Amazon-Advertising-API-ClientId"]=="id" and value.headers()["Authorization"]=="Bearer hidden-token" and "Amazon-Advertising-API-Scope" not in value.headers();assert value.headers("profile-1")["Amazon-Advertising-API-Scope"]=="profile-1";assert value.get_profile_scoped("campaigns") == {};assert value._session.calls[0]["headers"]["Amazon-Advertising-API-Scope"]=="profile-1";assert value._session.calls[0]["headers"]["Accept"]=="application/json" and "Content-Type" not in value._session.calls[0]["headers"];assert not any(hasattr(value,name) for name in ("put","patch","delete"))
+def test_profile_scoped_get_optional_reporting_media_type_preserves_standard_headers():
+    value=client([Response(200,{})]);media_type="application/vnd.createasyncreportrequest.v3+json"
+    assert value.get_profile_scoped("/reporting/reports/report",media_type=media_type)=={}
+    assert value._session.calls[0]["headers"]=={"Amazon-Advertising-API-ClientId":"id","Authorization":"Bearer hidden-token","Amazon-Advertising-API-Scope":"profile-1","Accept":media_type,"Content-Type":media_type}
 def test_profile_discovery_omits_scope_and_retries(monkeypatch):
     monkeypatch.setattr("app.amazon_ads.client.sleep",lambda _:None);value=client([Response(429),Response(500),Response(200,[])]);assert value.get("v2/profiles") == [] and len(value._session.calls)==3 and "Amazon-Advertising-API-Scope" not in value._session.calls[0]["headers"]
 def test_non_retryable_error_is_normalized_and_redacted():

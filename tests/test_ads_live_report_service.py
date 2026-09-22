@@ -2,9 +2,10 @@ from app.amazon_ads.report_transport import AdsReportTransport
 from app.services.ads_live_report_service import AdsLiveReportService
 
 class Client:
- def __init__(self):self.polls=0
- def post_read_only(self,*args,**kwargs):return {"reportId":"report"}
+ def __init__(self):self.polls=0;self.calls=[]
+ def post_read_only(self,*args,**kwargs):self.calls.append((args,kwargs));return {"reportId":"report"}
  def get_profile_scoped(self,path,**kwargs):
+  self.calls.append(((path,),kwargs))
   self.polls+=1
   if self.polls==1:return {"status":"processing"}
   if self.polls==2:return {"status":"completed","location":"safe"}
@@ -15,4 +16,5 @@ def test_live_report_transport_is_bounded_and_mockable():
  client=Client(); service=AdsLiveReportService(AdsReportTransport(client,max_attempts=3),Reporting())
  status,rows=service.request_poll_download("profile",{})
  assert status.status=="completed" and rows==[{"date":"2026-01-01"}]
+ assert client.calls[:2]==[(("/reporting/reports",),{"json":{},"profile_id":"profile","media_type":"application/vnd.createasyncreportrequest.v3+json"}),(("/reporting/reports/report",),{"profile_id":"profile","media_type":"application/vnd.createasyncreportrequest.v3+json"})]
  assert service.normalized_rows("s","m","p",{})[1]==["normalized"]
