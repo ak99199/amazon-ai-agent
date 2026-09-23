@@ -14,6 +14,9 @@ class AdsLiveReportDownloadValidationService:
   completed=lambda *args:self._completed(*args,seller_id,marketplace_id,on_validated)
   result=self.lifecycle.run_with_completed(confirm_live_read,completed)
   return result if isinstance(result,AdsLiveReportDownloadValidationResult) else self._from_lifecycle(result)
+ def complete(self,transport,run,report_status,on_validated=None):
+  ready=self.lifecycle.readiness_service.get()
+  return self._completed(transport,str(run.profile_id),run.report_id,report_status,run.started_at,ready,run.start_date,run.end_date,1,run.seller_id,run.marketplace_id,on_validated)
  def _completed(self,transport,profile_id,report_id,report_status,started,ready,start,end,polls,seller_id,marketplace_id,on_validated):
   try:rows,compressed_size,_=transport.download_gzip_json(report_status.location,self.compressed_limit,self.decompressed_limit)
   except AdsApiClientError as error:return self._result(self._api_status(error),started,ready,start,end,polls,True,False,False,False,0,0,0,0,False,"Historical report download failed.")

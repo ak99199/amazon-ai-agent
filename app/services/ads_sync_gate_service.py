@@ -7,12 +7,12 @@ from app.amazon_ads.sync_models import AdsSyncGateResult
 class AdsSyncGateService:
     def __init__(self,settings,repository,live_config=None,approval_status=None,now=None,cooldown_seconds=None):
         self.settings=settings;self.repository=repository;self.live_config=live_config or AdsLiveReadConfig.from_environment();self.approval_status=approval_status;self.now=now or (lambda:datetime.now(timezone.utc));self.cooldown_seconds=int(cooldown_seconds if cooldown_seconds is not None else getenv("AMAZON_ADS_MANUAL_SYNC_COOLDOWN_SECONDS","60"))
-    def evaluate(self,seller_id,marketplace_id,profile_id=None,start_date=None,end_date=None,window_days=7):
+    def evaluate(self,seller_id,marketplace_id,profile_id=None,start_date=None,end_date=None,window_days=7,cooldown_mode=None):
         today=self.now().date();profile_id=profile_id or self.settings.profile_id
         start_date,end_date=self._dates(start_date,end_date,window_days,today)
         approval=(self.approval_status or getenv("AMAZON_ADS_APPROVAL_STATUS","pending")).lower();config=not self.settings.missing_auth_fields;selected=bool(profile_id)
         active=self.repository.has_active_sync(seller_id,marketplace_id,profile_id,self.now()-timedelta(minutes=30)) if profile_id else False
-        recent=self.repository.latest_successful_sync(seller_id,marketplace_id,profile_id) if profile_id else None
+        recent=self.repository.latest_successful_sync(seller_id,marketplace_id,profile_id,cooldown_mode) if profile_id else None
         recent_at=recent.finished_at or recent.started_at if recent else None
         cooldown=bool(recent_at and recent_at > self.now()-timedelta(seconds=max(0,self.cooldown_seconds)))
         checks=[]; add=lambda name,passed,reason:checks.append({"name":name,"passed":passed,"reason":reason})

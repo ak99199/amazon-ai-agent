@@ -37,6 +37,33 @@ def test_fresh_run_is_not_stale():
  repo,_=repository();active=run("fresh",NOW-timedelta(hours=5,minutes=59));assert repo.start_sync_run_if_idle(active,NOW-timedelta(days=1))
  assert not repo.finalize_stale_sync_run("fresh","s","m","p",NOW-timedelta(hours=6),NOW) and repo.active_sync_run("s","m","p").sync_id=="fresh"
 
+def test_async_report_state_round_trip_and_single_claim():
+ repo,resource=repository();value=replace(run("async"),amazon_report_status="creating")
+ assert repo.start_sync_run_if_idle(value,NOW-timedelta(days=1))
+ created=replace(value,report_id="private-report",report_type_id="spCampaigns",amazon_report_status="pending",report_created_at=NOW)
+ assert repo.save_created_report(created);active=repo.active_sync_run("s","m","p")
+ assert active.report_id=="private-report" and active.amazon_report_status=="pending"
+ claimed=repo.claim_report_check("s","m","p","async","claim",NOW)
+ assert claimed and repo.claim_report_check("s","m","p","async","second",NOW) is None
+ checked=replace(claimed,amazon_report_status="processing",report_last_checked_at=NOW)
+ assert repo.save_report_check(checked,"claim") and repo.active_sync_run("s","m","p").report_claim is None
+ final_claim=repo.claim_report_check("s","m","p","async","final",NOW);repo.save_sync_run(terminal(final_claim))
+ assert repo.active_sync_run("s","m","p") is None
+ with pytest.raises(AdsDynamoDbRepositoryError):repo.save_sync_run(terminal(final_claim))
+ assert "report_id" not in created.public_dict() and "private-report" not in str(created.public_dict())
+ assert all("signed" not in str(item) and "token" not in str(item) for item in resource.store["runs"].values())
+
+def test_old_dynamodb_run_without_optional_report_fields_deserializes():
+ repo,_=repository();stored=repo._run_item(run("old"))
+ assert not any(field in stored for field in ("report_id","report_type_id","amazon_report_status","report_created_at","report_last_checked_at","report_claim"))
+ restored=repo._run(stored)
+ assert restored.report_id is None and restored.amazon_report_status is None and restored.report_claim is None
+
+def test_validation_run_does_not_count_as_historical_ingestion():
+ repo,_=repository();validation=replace(run("validation",trigger="validation"),mode="historical_report_validation")
+ assert repo.start_sync_run_if_idle(validation,NOW-timedelta(days=1));repo.save_sync_run(terminal(validation))
+ assert repo.count_ingestion_runs("s","m","p")==0 and repo.get_latest_ingestion_run("s","m","p") is None and repo.get_latest_successful_ingestion_run("s","m","p") is None
+
 def test_ingestion_reads_return_empty_results():
  repo,_=repository()
  assert [repo.count_ingestion_runs("s","m","p",success) for success in (None,True,False)]==[0,0,0]
@@ -101,7 +128,7 @@ def test_ingestion_reads_sanitize_storage_failures(monkeypatch,method):
 def test_ingestion_reads_sanitize_malformed_stored_values(method,field):
  repo,resource=repository();value=run("malformed",NOW-timedelta(hours=1))
  assert repo.start_sync_run_if_idle(value,NOW-timedelta(days=1));repo.save_sync_run(terminal(value))
- key="SUMMARY#SUCCESS#ANY" if method=="get_latest_successful_ingestion_run" else repo.run_key(value)
+ key="SUMMARY#SUCCESS#MODE#historical_campaign_report" if method=="get_latest_successful_ingestion_run" else repo.run_key(value)
  resource.store["runs"][(repo.scope_key("s","m","p"),key)][field]="private-stored-detail"
  with pytest.raises(AdsDynamoDbRepositoryError) as failure:getattr(repo,method)("s","m","p")
  assert "private-stored-detail" not in str(failure.value)

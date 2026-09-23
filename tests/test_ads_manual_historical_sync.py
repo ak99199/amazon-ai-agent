@@ -1,45 +1,109 @@
-from datetime import date,datetime,timedelta,timezone
+from datetime import date,datetime,timezone
+
 import pytest
+
 from app.amazon_ads.config import AdsSettings
-from app.amazon_ads.live_models import AdsHistoricalReportPersistenceResult
+from app.amazon_ads.live_models import AdsLiveReportStatus
 from app.amazon_ads.live_read import AdsLiveReadConfig
-from app.amazon_ads.sync_models import AdsSyncGateResult
-from app.services.ads_manual_historical_sync_service import AdsManualHistoricalSyncService,HISTORICAL_SYNC_MODE
+from app.amazon_ads.reporting import SponsoredProductsReportingService
+from app.amazon_ads.sync_models import AdsManualSyncResult
+from app.database.ads_repository import AdsPerformanceRepository
+from app.services.ads_historical_sync_execution_service import HISTORICAL_SYNC_MODE,VALIDATION_SYNC_MODE
+from app.services.ads_live_report_download_validation_service import AdsLiveReportDownloadValidationService
+from app.services.ads_live_report_lifecycle_validation_service import AdsLiveReportLifecycleValidationService
+from app.services.ads_live_report_persistence_service import AdsLiveReportPersistenceService
+from app.services.ads_manual_historical_sync_service import AdsManualHistoricalSyncService
 from app.services.ads_production_readiness_service import AdsProductionReadinessService
-NOW=datetime(2026,2,10,tzinfo=timezone.utc)
-def readiness(approval="approved",settings=None,config=None):return AdsProductionReadinessService(settings or AdsSettings("id","secret","refresh","profile","FE"),config or AdsLiveReadConfig(True,False),approval)
-class Gate:
- def __init__(self,allowed=True,active=False,cooldown=False):self.allowed=allowed;self.active=active;self.cooldown=cooldown;self.calls=[]
- def evaluate(self,*args):self.calls.append(args);return AdsSyncGateResult(self.allowed,"live" if self.allowed else None,"allowed_live" if self.allowed else "blocked", "allowed" if self.allowed else "blocked","approved",True,False,True,True,self.active,self.cooldown,date(2026,2,8),date(2026,2,9),2,())
-class Repo:
- def __init__(self,start=True,save_error=False):self.start=start;self.save_error=save_error;self.started=[];self.saved=[]
- def start_sync_run_if_idle(self,run,not_before):self.started.append(run);return self.start
- def save_sync_run(self,run):
-  if self.save_error:raise RuntimeError("raw SQL")
-  self.saved.append(run);return run
-class Persistence:
- def __init__(self,status="success",rows=2,error=None):self.status=status;self.rows=rows;self.error=error;self.calls=[]
- def run(self,confirm):
-  self.calls.append(confirm)
-  if self.error:raise self.error
-  return AdsHistoricalReportPersistenceResult(self.status,NOW,NOW,"campaign","2026-02-08","2026-02-09",self.rows,self.rows,self.rows,(),(),"safe")
-def service(ready=None,gate=None,repo=None,persistence=None):
- repo=repo or Repo();gate=gate or Gate();persistence=persistence or Persistence();return AdsManualHistoricalSyncService(ready or readiness(),gate,repo,persistence,lambda:NOW),repo,gate,persistence
-def test_confirmation_false_creates_no_run_or_pipeline_call():
- svc,repo,gate,persistence=service();result=svc.run("seller","market",False);assert result.status=="blocked_confirmation" and repo.started==[] and gate.calls==[] and persistence.calls==[]
-@pytest.mark.parametrize("ready",[readiness("pending"),readiness("rejected"),readiness(config=AdsLiveReadConfig(False,False)),readiness(config=AdsLiveReadConfig(True,True)),readiness(settings=AdsSettings(None,"secret","refresh","profile","FE")),readiness(settings=AdsSettings("id","secret","refresh",None,"FE")),readiness(settings=AdsSettings("id","secret","refresh","profile","XX"))])
-def test_readiness_blocks_before_gate_run_or_pipeline(ready):
- svc,repo,gate,persistence=service(ready=ready);result=svc.run("seller","market",True);assert result.status=="blocked_readiness" and repo.started==[] and gate.calls==[] and persistence.calls==[]
-@pytest.mark.parametrize("gate,expected",[(Gate(False,True,False),"already_running"),(Gate(False,False,True),"cooldown_active")])
-def test_concurrency_and_cooldown_create_no_second_run(gate,expected):
- svc,repo,_,persistence=service(gate=gate);result=svc.run("seller","market",True);assert result.status==expected and repo.started==[] and persistence.calls==[]
-def test_atomic_start_rejection_creates_no_report_or_persistence():
- svc,repo,_,persistence=service(repo=Repo(start=False));result=svc.run("seller","market",True);assert result.status=="already_running" and len(repo.started)==1 and persistence.calls==[]
-def test_success_and_valid_empty_finalize_existing_run():
- for status,rows in (("success",2),("valid_empty",0)):
-  svc,repo,_,_=service(persistence=Persistence(status,rows));result=svc.run("seller","market",True);assert result.status=="succeeded" and result.rows_persisted==rows and result.valid_empty==(status=="valid_empty") and len(repo.started)==1 and len(repo.saved)==1 and repo.saved[0].mode==HISTORICAL_SYNC_MODE and repo.saved[0].success
-@pytest.mark.parametrize("status",["partial_valid","auth_error","rate_limited","remote_error","poll_timeout","download_error","persistence_error"])
-def test_controlled_failures_finalize_run_as_failed(status):
- svc,repo,_,_=service(persistence=Persistence(status,0));result=svc.run("seller","market",True);assert result.status=="failed" and len(repo.saved)==1 and repo.saved[0].status=="failed" and repo.saved[0].error_code==status
-def test_unexpected_failure_is_sanitized_and_finalized():
- svc,repo,_,_=service(persistence=Persistence(error=RuntimeError("signed URL Authorization")));result=svc.run("seller","market",True);assert result.status=="failed" and len(repo.saved)==1 and "signed" not in str(result.public_dict()) and "Authorization" not in str(result.public_dict())
+from app.services.ads_sync_gate_service import AdsSyncGateService
+
+NOW=datetime(2026,2,10,12,tzinfo=timezone.utc)
+
+def report_row():return {"date":"2026-02-08","campaignId":"c1","impressions":"10","clicks":"2","cost":"1.25","purchases14d":"1","unitsSoldClicks14d":"1","sales14d":"4.50"}
+def readiness():return AdsProductionReadinessService(AdsSettings("id","secret","refresh","profile","FE"),AdsLiveReadConfig(True,False),"approved")
+
+class Transport:
+ def __init__(self,repository,statuses=(),rows=None):self.repository=repository;self.statuses=list(statuses);self.rows=[report_row()] if rows is None else rows;self.creates=[];self.checks=[];self.downloads=[]
+ def create(self,profile,definition):
+  assert self.repository.active_sync_run("seller","market",profile) is not None
+  self.creates.append((profile,definition));return "internal-report-id"
+ def status(self,profile,report_id):
+  self.checks.append((profile,report_id));return AdsLiveReportStatus(report_id,self.statuses.pop(0),"https://signed-secret")
+ def download_gzip_json(self,location,*limits):self.downloads.append((location,limits));return self.rows,100,200
+
+def service(tmp_path,transport=None,mode=HISTORICAL_SYNC_MODE,download=True,persist=True,repository=None):
+ repository=repository or AdsPerformanceRepository(tmp_path/"ads.db");transport=transport or Transport(repository);ready=readiness();reporting=SponsoredProductsReportingService()
+ dependencies=lambda:(transport,reporting)
+ lifecycle=AdsLiveReportLifecycleValidationService(ready,dependencies,now=lambda:NOW,sleeper=lambda _:None)
+ validator=AdsLiveReportDownloadValidationService(lifecycle,reporting)
+ persistence_service=AdsLiveReportPersistenceService(validator,repository,"seller","market")
+ gate=AdsSyncGateService(ready.settings,repository,ready.config,ready.approval_status,lambda:NOW,cooldown_seconds=60)
+ return AdsManualHistoricalSyncService(ready,gate,repository,persistence_service,lambda:NOW,dependency_factory=dependencies,mode=mode,trigger_source="manual" if persist else "validation",download=download,persist=persist),repository,transport
+
+def test_create_is_reserved_saved_once_and_never_public(tmp_path):
+ svc,repo,transport=service(tmp_path);result=svc.run("seller","market",True);active=repo.active_sync_run("seller","market","profile")
+ assert result.status=="pending" and len(transport.creates)==1 and transport.checks==[]
+ assert active.report_id=="internal-report-id" and active.amazon_report_status=="pending" and active.report_type_id=="spCampaigns"
+ assert "report_id" not in result.public_dict() and "internal-report-id" not in str(result.public_dict())
+
+def test_pending_resumes_same_report_keeps_lock_and_updates_check(tmp_path):
+ svc,repo,transport=service(tmp_path);transport.statuses=["pending"]
+ first=svc.run("seller","market",True);second=svc.run("seller","market",True);active=repo.active_sync_run("seller","market","profile")
+ assert first.run_id==second.run_id and second.status=="pending" and len(transport.creates)==1
+ assert transport.checks==[("profile","internal-report-id")] and active.sync_id==first.run_id and active.report_last_checked_at==NOW and active.report_claim is None
+
+def test_completed_manual_sync_downloads_persists_finalizes_once(tmp_path):
+ svc,repo,transport=service(tmp_path);transport.statuses=["completed"]
+ svc.run("seller","market",True);result=svc.run("seller","market",True);again=svc.run("seller","market",True)
+ assert result.status=="succeeded" and result.rows_persisted==1 and len(transport.downloads)==1
+ assert repo.count_performance_rows("seller","market","profile")==1 and repo.active_sync_run("seller","market","profile") is None
+ assert again.status=="cooldown_active" and len(transport.creates)==1 and len(transport.downloads)==1
+
+def test_validation_lifecycle_and_download_reuse_report_without_persistence(tmp_path):
+ repo=AdsPerformanceRepository(tmp_path/"ads.db");transport=Transport(repo,["pending","completed"])
+ lifecycle,_,_=service(tmp_path,transport,VALIDATION_SYNC_MODE,False,False,repo);download,_,_=service(tmp_path,transport,VALIDATION_SYNC_MODE,True,False,repo)
+ created=lifecycle.run("seller","market",True);pending=lifecycle.run("seller","market",True);completed=download.run("seller","market",True)
+ assert created.run_id==pending.run_id==completed.run_id and pending.status=="pending" and completed.status=="validation_succeeded"
+ assert len(transport.creates)==1 and len(transport.downloads)==1 and repo.count_performance_rows("seller","market","profile")==0
+ assert repo.latest_successful_sync("seller","market","profile",HISTORICAL_SYNC_MODE) is None
+
+def test_completed_lifecycle_is_download_ready_without_downloading_or_releasing(tmp_path):
+ repo=AdsPerformanceRepository(tmp_path/"ads.db");transport=Transport(repo,["completed"]);lifecycle,_,_=service(tmp_path,transport,VALIDATION_SYNC_MODE,False,False,repo)
+ lifecycle.run("seller","market",True);result=lifecycle.run("seller","market",True)
+ assert result.status=="download_ready" and transport.downloads==[] and repo.active_sync_run("seller","market","profile").sync_id==result.run_id
+
+def test_download_validation_pending_never_downloads(tmp_path):
+ repo=AdsPerformanceRepository(tmp_path/"ads.db");transport=Transport(repo,["pending"]);download,_,_=service(tmp_path,transport,VALIDATION_SYNC_MODE,True,False,repo)
+ download.run("seller","market",True);result=download.run("seller","market",True)
+ assert result.status=="pending" and transport.downloads==[] and repo.active_sync_run("seller","market","profile") is not None
+
+@pytest.mark.parametrize("status",["failed","cancelled"])
+def test_terminal_amazon_failure_releases_lock_without_persistence(tmp_path,status):
+ svc,repo,transport=service(tmp_path);transport.statuses=[status]
+ svc.run("seller","market",True);result=svc.run("seller","market",True)
+ assert result.status=="failed" and result.error_code=="report_failed" and repo.active_sync_run("seller","market","profile") is None
+ assert transport.downloads==[] and repo.count_performance_rows("seller","market","profile")==0
+
+def test_creating_without_report_id_never_recreates(tmp_path):
+ repo=AdsPerformanceRepository(tmp_path/"ads.db");run=AdsManualSyncResult("run",HISTORICAL_SYNC_MODE,"seller","market","profile",date(2026,2,8),date(2026,2,9),NOW,None,False,"running",trigger_source="manual",amazon_report_status="creating")
+ assert repo.start_sync_run_if_idle(run,NOW);svc,_,transport=service(tmp_path,repository=repo);result=svc.run("seller","market",True)
+ assert result.status=="creating_unconfirmed" and transport.creates==[] and transport.checks==[]
+
+def test_failed_report_id_save_gap_does_not_recreate(tmp_path):
+ class GapRepository(AdsPerformanceRepository):
+  def save_created_report(self,run):return False
+ repo=GapRepository(tmp_path/"ads.db");svc,_,transport=service(tmp_path,repository=repo)
+ first=svc.run("seller","market",True);second=svc.run("seller","market",True)
+ assert first.status==second.status=="creating_unconfirmed" and len(transport.creates)==1 and transport.checks==[]
+
+def test_concurrent_resume_claim_allows_no_second_processing(tmp_path):
+ svc,repo,transport=service(tmp_path);created=svc.run("seller","market",True)
+ assert repo.claim_report_check("seller","market","profile",created.run_id,"other-claim",NOW)
+ result=svc.run("seller","market",True)
+ assert result.status=="already_processing" and transport.checks==[] and transport.downloads==[]
+
+def test_status_failure_is_sanitized_and_releases_claim_for_retry(tmp_path):
+ class BrokenTransport(Transport):
+  def status(self,profile,report_id):raise RuntimeError("Authorization signed-secret refresh-token")
+ repo=AdsPerformanceRepository(tmp_path/"ads.db");transport=BrokenTransport(repo);svc,_,_=service(tmp_path,transport,repository=repo)
+ svc.run("seller","market",True);result=svc.run("seller","market",True);active=repo.active_sync_run("seller","market","profile")
+ assert result.status=="unavailable" and active.report_claim is None and "signed-secret" not in str(result.public_dict()) and "refresh-token" not in str(result.public_dict())

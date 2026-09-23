@@ -20,8 +20,12 @@ class Client:
    values={k:decode(v) for k,v in payload.get("ExpressionAttributeValues",{}).items()}
    if "attribute_not_exists(scope_key)" in condition and current is not None:raise ConditionalCheckFailedException()
    if "#status IN" in condition and (not current or current.get("status") not in ("running","starting")):raise ConditionalCheckFailedException()
-   if "#status = :running" in condition and (not current or current.get("status")!="running" or current.get("started_at")>values[":cutoff"]):raise ConditionalCheckFailedException()
+   if "#status = :running" in condition and (not current or current.get("status")!="running" or (":cutoff" in values and current.get("started_at")>values[":cutoff"])):raise ConditionalCheckFailedException()
    if "sync_id = :sync" in condition and (not current or current.get("sync_id")!=values[":sync"]):raise ConditionalCheckFailedException()
+   if "attribute_exists(report_id)" in condition and (not current or not current.get("report_id")):raise ConditionalCheckFailedException()
+   if "attribute_not_exists(report_id)" in condition and current and current.get("report_id") is not None:raise ConditionalCheckFailedException()
+   if "attribute_not_exists(report_claim)" in condition and current and current.get("report_claim") is not None:raise ConditionalCheckFailedException()
+   if "report_claim = :claim" in condition and (not current or current.get("report_claim")!=values[":claim"]):raise ConditionalCheckFailedException()
    if "started_at <= :cutoff" in condition and current.get("started_at")>values[":cutoff"]:raise ConditionalCheckFailedException()
    if "attribute_not_exists(started_at) OR" in condition and current and current.get("started_at")>values[":started"]:raise ConditionalCheckFailedException()
    if name=="Put":table[key]=source

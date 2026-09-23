@@ -1,4 +1,5 @@
 """Dedicated DynamoDB repository for historical Amazon Ads data only."""
+from dataclasses import replace
 from datetime import date,datetime,timedelta
 from decimal import Decimal
 from app.amazon_ads.report_models import AdsPerformanceDaily
@@ -33,10 +34,12 @@ class DynamoDbAdsHistoricalRepository:
         return {"scope_key":_scope(row.seller_id,row.marketplace_id,row.profile_id),"performance_key":DynamoDbAdsHistoricalRepository.performance_key(row),"seller_id":row.seller_id,"marketplace_id":row.marketplace_id,"profile_id":str(row.profile_id),"date":row.date.isoformat(),"ad_product":row.ad_product,"campaign_id":row.campaign_id,"campaign_name":row.campaign_name,"ad_group_id":row.ad_group_id,"ad_group_name":row.ad_group_name,"keyword_id":row.keyword_id,"keyword_text":row.keyword_text,"match_type":row.match_type,"target_id":row.target_id,"target_expression":row.target_expression,"search_term":row.search_term,"currency":row.currency,"impressions":int(row.impressions),"clicks":int(row.clicks),"spend":Decimal(row.spend),"orders":int(row.orders),"units":int(row.units),"sales":Decimal(row.sales),"dimension_key":row.dimension_key,"grain_type":"campaign" if row.campaign_id and not any((row.keyword_id,row.target_id,row.search_term)) else "detail"}
     @staticmethod
     def _run_item(run,key=None):
-        return {"scope_key":_scope(run.seller_id,run.marketplace_id,run.profile_id),"run_key":key or DynamoDbAdsHistoricalRepository.run_key(run),"sync_id":run.sync_id,"seller_id":run.seller_id,"marketplace_id":run.marketplace_id,"profile_id":str(run.profile_id),"mode":run.mode,"start_date":run.start_date.isoformat(),"end_date":run.end_date.isoformat(),"started_at":run.started_at.isoformat(),"finished_at":run.finished_at.isoformat() if run.finished_at else None,"success":bool(run.success),"status":run.status,"campaigns_fetched":int(run.campaigns_fetched),"ad_groups_fetched":int(run.ad_groups_fetched),"keywords_fetched":int(run.keywords_fetched),"targets_fetched":int(run.targets_fetched),"report_rows_received":int(run.report_rows_received),"rows_normalized":int(run.rows_normalized),"rows_saved":int(run.rows_saved),"rows_failed":int(run.rows_failed),"error_code":run.error_code,"error_summary":run.safe_error_message,"trigger_source":run.trigger_source}
+        item={"scope_key":_scope(run.seller_id,run.marketplace_id,run.profile_id),"run_key":key or DynamoDbAdsHistoricalRepository.run_key(run),"sync_id":run.sync_id,"seller_id":run.seller_id,"marketplace_id":run.marketplace_id,"profile_id":str(run.profile_id),"mode":run.mode,"start_date":run.start_date.isoformat(),"end_date":run.end_date.isoformat(),"started_at":run.started_at.isoformat(),"finished_at":run.finished_at.isoformat() if run.finished_at else None,"success":bool(run.success),"status":run.status,"campaigns_fetched":int(run.campaigns_fetched),"ad_groups_fetched":int(run.ad_groups_fetched),"keywords_fetched":int(run.keywords_fetched),"targets_fetched":int(run.targets_fetched),"report_rows_received":int(run.report_rows_received),"rows_normalized":int(run.rows_normalized),"rows_saved":int(run.rows_saved),"rows_failed":int(run.rows_failed),"error_code":run.error_code,"error_summary":run.safe_error_message,"trigger_source":run.trigger_source}
+        optional={"report_id":run.report_id,"report_type_id":run.report_type_id,"amazon_report_status":run.amazon_report_status,"report_created_at":run.report_created_at.isoformat() if run.report_created_at else None,"report_last_checked_at":run.report_last_checked_at.isoformat() if run.report_last_checked_at else None,"report_claim":run.report_claim}
+        item.update({name:value for name,value in optional.items() if value is not None});return item
     @staticmethod
     def _run(item):
-        return AdsManualSyncResult(item["sync_id"],item["mode"],item["seller_id"],item["marketplace_id"],item.get("profile_id"),date.fromisoformat(item["start_date"]),date.fromisoformat(item["end_date"]),datetime.fromisoformat(item["started_at"]),datetime.fromisoformat(item["finished_at"]) if item.get("finished_at") else None,bool(item.get("success")),item["status"],int(item.get("campaigns_fetched",0)),int(item.get("ad_groups_fetched",0)),int(item.get("keywords_fetched",0)),int(item.get("targets_fetched",0)),int(item.get("report_rows_received",0)),int(item.get("rows_normalized",0)),int(item.get("rows_saved",0)),int(item.get("rows_failed",0)),item.get("error_code"),item.get("error_summary"),item.get("trigger_source","manual"))
+        return AdsManualSyncResult(item["sync_id"],item["mode"],item["seller_id"],item["marketplace_id"],item.get("profile_id"),date.fromisoformat(item["start_date"]),date.fromisoformat(item["end_date"]),datetime.fromisoformat(item["started_at"]),datetime.fromisoformat(item["finished_at"]) if item.get("finished_at") else None,bool(item.get("success")),item["status"],int(item.get("campaigns_fetched",0)),int(item.get("ad_groups_fetched",0)),int(item.get("keywords_fetched",0)),int(item.get("targets_fetched",0)),int(item.get("report_rows_received",0)),int(item.get("rows_normalized",0)),int(item.get("rows_saved",0)),int(item.get("rows_failed",0)),item.get("error_code"),item.get("error_summary"),item.get("trigger_source","manual"),item.get("report_id"),item.get("report_type_id"),item.get("amazon_report_status"),datetime.fromisoformat(item["report_created_at"]) if item.get("report_created_at") else None,datetime.fromisoformat(item["report_last_checked_at"]) if item.get("report_last_checked_at") else None,item.get("report_claim"))
     def _transact(self,items):
         try:self.client.transact_write_items(TransactItems=items)
         except Exception as error:raise AdsDynamoDbRepositoryError("Amazon Ads persistent storage operation failed.") from None
@@ -106,7 +109,30 @@ class DynamoDbAdsHistoricalRepository:
         except Exception:raise AdsDynamoDbRepositoryError("Amazon Ads persistent storage read failed.") from None
         return self._run(item) if item else None
     def has_active_sync(self,seller,marketplace,profile,not_before):
-        active=self.active_sync_run(seller,marketplace,profile);return bool(active and active.started_at>=not_before)
+        del not_before;return self.active_sync_run(seller,marketplace,profile) is not None
+    def save_created_report(self,run):
+        scope=_scope(run.seller_id,run.marketplace_id,run.profile_id);history=self.run_key(run);item=self._run_item(run);lock=self._run_item(run,"LOCK");values={":sync":_av(run.sync_id),":running":_av("running")};condition="sync_id = :sync AND #status = :running AND attribute_not_exists(report_id)"
+        transaction=[{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(item),"ConditionExpression":condition,"ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":values}},{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(lock),"ConditionExpression":condition,"ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":values}}]
+        try:self.client.transact_write_items(TransactItems=transaction);return True
+        except Exception as error:
+            if self._conditional_failure(error):return False
+            raise AdsDynamoDbRepositoryError("Amazon Ads persistent storage operation failed.") from None
+    def claim_report_check(self,seller,marketplace,profile,run_id,claim,checked_at):
+        active=self.active_sync_run(seller,marketplace,profile)
+        if not active or active.sync_id!=run_id or not active.report_id or active.report_claim:return None
+        claimed=replace(active,report_claim=claim,report_last_checked_at=checked_at);item=self._run_item(claimed);lock=self._run_item(claimed,"LOCK");values={":sync":_av(run_id),":running":_av("running")};condition="sync_id = :sync AND #status = :running AND attribute_exists(report_id) AND attribute_not_exists(report_claim)"
+        transaction=[{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(item),"ConditionExpression":condition,"ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":values}},{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(lock),"ConditionExpression":condition,"ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":values}}]
+        try:self.client.transact_write_items(TransactItems=transaction);return claimed
+        except Exception as error:
+            if self._conditional_failure(error):return None
+            raise AdsDynamoDbRepositoryError("Amazon Ads persistent storage operation failed.") from None
+    def save_report_check(self,run,claim):
+        item=self._run_item(replace(run,report_claim=None));lock=self._run_item(replace(run,report_claim=None),"LOCK");values={":sync":_av(run.sync_id),":running":_av("running"),":claim":_av(claim)};condition="sync_id = :sync AND #status = :running AND report_claim = :claim"
+        transaction=[{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(item),"ConditionExpression":condition,"ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":values}},{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(lock),"ConditionExpression":condition,"ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":values}}]
+        try:self.client.transact_write_items(TransactItems=transaction);return True
+        except Exception as error:
+            if self._conditional_failure(error):return False
+            raise AdsDynamoDbRepositoryError("Amazon Ads persistent storage operation failed.") from None
     @staticmethod
     def _summary_keys(run,failed=False):
         kind="FAILED" if failed else "SUCCESS";mode=run.mode;source=run.trigger_source
@@ -120,13 +146,14 @@ class DynamoDbAdsHistoricalRepository:
     def save_sync_run(self,run):
         if run.status in ("starting","running"):
             self._transact([{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(self._run_item(run)),"ConditionExpression":"attribute_not_exists(scope_key) AND attribute_not_exists(run_key)"}}]);return run
-        scope=_scope(run.seller_id,run.marketplace_id,run.profile_id);key=self.run_key(run);item=self._run_item(run)
-        transaction=[{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(item),"ConditionExpression":"#status IN (:running,:starting)","ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":{":running":_av("running"),":starting":_av("starting")}}},{"Delete":{"TableName":self.sync_runs_table_name,"Key":_encoded({"scope_key":scope,"run_key":"LOCK"}),"ConditionExpression":"sync_id = :sync","ExpressionAttributeValues":{":sync":_av(run.sync_id)}}},*self._summary_puts(run,failed=not run.success)]
+        scope=_scope(run.seller_id,run.marketplace_id,run.profile_id);key=self.run_key(run);item=self._run_item(replace(run,report_claim=None));claim=" AND report_claim = :claim" if run.report_claim else "";values={":running":_av("running"),":starting":_av("starting")};lock_values={":sync":_av(run.sync_id)}
+        if run.report_claim:values[":claim"]=_av(run.report_claim);lock_values[":claim"]=_av(run.report_claim)
+        transaction=[{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(item),"ConditionExpression":"#status IN (:running,:starting)"+claim,"ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":values}},{"Delete":{"TableName":self.sync_runs_table_name,"Key":_encoded({"scope_key":scope,"run_key":"LOCK"}),"ConditionExpression":"sync_id = :sync"+claim,"ExpressionAttributeValues":lock_values}},*self._summary_puts(replace(run,report_claim=None),failed=not run.success)]
         self._transact(transaction);return run
     def finalize_stale_sync_run(self,run_id,seller,marketplace,profile,cutoff,finished_at):
         active=self.active_sync_run(seller,marketplace,profile)
         if not active or active.sync_id!=run_id or active.status!="running" or active.started_at>cutoff:return False
-        failed=AdsManualSyncResult(active.sync_id,active.mode,active.seller_id,active.marketplace_id,active.profile_id,active.start_date,active.end_date,active.started_at,finished_at,False,"failed",active.campaigns_fetched,active.ad_groups_fetched,active.keywords_fetched,active.targets_fetched,active.report_rows_received,active.rows_normalized,active.rows_saved,active.rows_failed,"stale_run_timeout","Previous Ads sync exceeded the allowed running window and was finalized as failed.",active.trigger_source)
+        failed=replace(active,finished_at=finished_at,success=False,status="failed",error_code="stale_run_timeout",safe_error_message="Previous Ads sync exceeded the allowed running window and was finalized as failed.",report_claim=None)
         scope=_scope(seller,marketplace,profile);item=self._run_item(failed)
         transaction=[{"Put":{"TableName":self.sync_runs_table_name,"Item":_encoded(item),"ConditionExpression":"#status = :running AND started_at <= :cutoff","ExpressionAttributeNames":{"#status":"status"},"ExpressionAttributeValues":{":running":_av("running"),":cutoff":_av(cutoff.isoformat())}}},{"Delete":{"TableName":self.sync_runs_table_name,"Key":_encoded({"scope_key":scope,"run_key":"LOCK"}),"ConditionExpression":"sync_id = :sync AND started_at <= :cutoff","ExpressionAttributeValues":{":sync":_av(run_id),":cutoff":_av(cutoff.isoformat())}}},*self._summary_puts(failed,failed=True)]
         try:self.client.transact_write_items(TransactItems=transaction);return True
@@ -145,16 +172,16 @@ class DynamoDbAdsHistoricalRepository:
         return items if limit is None else items[:limit]
     def count_ingestion_runs(self,seller_id,marketplace_id,profile_id,success=None):
         return sum(1 for item in self._query_runs(seller_id,marketplace_id,profile_id,limit=None)
-                   if item.get("finished_at") and (success is None or bool(item.get("success"))==success))
+                   if item.get("finished_at") and item.get("mode")=="historical_campaign_report" and (success is None or bool(item.get("success"))==success))
     def get_latest_ingestion_run(self,seller_id,marketplace_id,profile_id):
         for item in self._query_runs(seller_id,marketplace_id,profile_id,limit=None):
-            if item.get("finished_at"):
+            if item.get("finished_at") and item.get("mode")=="historical_campaign_report":
                 try:run=self._run(item)
                 except (KeyError,TypeError,ValueError,ArithmeticError):raise AdsDynamoDbRepositoryError("Amazon Ads stored sync data is invalid.") from None
                 return {"run_id":run.sync_id,**run.public_dict()}
         return None
     def get_latest_successful_ingestion_run(self,seller_id,marketplace_id,profile_id):
-        try:run=self.latest_successful_sync(seller_id,marketplace_id,profile_id)
+        try:run=self.latest_successful_sync(seller_id,marketplace_id,profile_id,"historical_campaign_report")
         except (KeyError,TypeError,ValueError,ArithmeticError):raise AdsDynamoDbRepositoryError("Amazon Ads stored sync data is invalid.") from None
         return {"run_id":run.sync_id,**run.public_dict()} if run else None
     def list_sync_runs(self,seller,marketplace,profile,limit=20,mode=None):

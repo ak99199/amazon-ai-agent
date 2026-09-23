@@ -8,6 +8,10 @@ class AdsLiveReportPersistenceService:
   result=self.download.run_with_validated(confirm_live_read,self.seller_id,self.marketplace_id,self._persist)
   if isinstance(result,AdsHistoricalReportPersistenceResult):return result
   return AdsHistoricalReportPersistenceResult(result.status,result.started_at,result.completed_at,result.report_kind,result.start_date,result.end_date,result.rows_validated,0,0,result.warnings,result.blocking_reasons,result.message)
+ def complete(self,transport,run,report_status):
+  result=self.download.complete(transport,run,report_status,self._persist)
+  if isinstance(result,AdsHistoricalReportPersistenceResult):return result
+  return AdsHistoricalReportPersistenceResult(result.status,result.started_at,result.completed_at,result.report_kind,result.start_date,result.end_date,result.rows_validated,0,0,result.warnings,result.blocking_reasons,result.message)
  def _persist(self,rows,validation):
   if validation.status not in ("success","valid_empty") or validation.rows_truncated:return AdsHistoricalReportPersistenceResult("validation_error" if validation.rows_truncated else validation.status,validation.started_at,validation.completed_at,validation.report_kind,validation.start_date,validation.end_date,validation.rows_validated,0,0,validation.warnings,validation.blocking_reasons,"Report validation did not permit persistence.")
   settings=getattr(getattr(self.download.lifecycle,"readiness_service",None),"settings",None);profile_id=getattr(settings,"profile_id",None)

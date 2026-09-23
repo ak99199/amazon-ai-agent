@@ -52,6 +52,7 @@ from app.services.ads_live_report_lifecycle_validation_service import AdsLiveRep
 from app.services.ads_live_report_download_validation_service import AdsLiveReportDownloadValidationService
 from app.services.ads_live_report_persistence_service import AdsLiveReportPersistenceService
 from app.services.ads_manual_historical_sync_service import AdsManualHistoricalSyncService,HISTORICAL_SYNC_MODE
+from app.services.ads_historical_sync_execution_service import VALIDATION_SYNC_MODE
 from app.services.ads_historical_sync_health_service import AdsHistoricalSyncHealthService
 from app.services.ads_scheduled_sync_health_service import AdsScheduledSyncHealthService
 from app.services.ads_sync_recovery_service import AdsSyncRecoveryService
@@ -121,26 +122,21 @@ def _live_targeting_validation_service():
         settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsProfilesService(client),SponsoredProductsReadAdapter(client,max_pages=1,page_size=25)
     return AdsLiveTargetingValidationService(readiness,dependency_factory)
 
-def _live_report_lifecycle_validation_service():
-    readiness=_production_readiness_service()
-    def dependency_factory():
-        settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),SponsoredProductsReportingService()
-    return AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5)
-
-def _live_report_download_validation_service():
-    readiness=_production_readiness_service();reporting=SponsoredProductsReportingService()
-    def dependency_factory():
-        settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),reporting
-    lifecycle=AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5)
-    return AdsLiveReportDownloadValidationService(lifecycle,reporting,row_limit=100,compressed_limit=1048576,decompressed_limit=5242880)
-
-def _manual_historical_sync_service(repository,context):
+def _historical_report_service(repository,context,mode,do_download,persist):
     readiness=_production_readiness_service();reporting=SponsoredProductsReportingService()
     def dependency_factory():
         settings=readiness.settings;client=AmazonAdsClient(settings,AdsLwaAuthenticator(settings));return AdsReportTransport(client,max_attempts=1),reporting
     lifecycle=AdsLiveReportLifecycleValidationService(readiness,dependency_factory,max_polls=5);download=AdsLiveReportDownloadValidationService(lifecycle,reporting,row_limit=100,compressed_limit=1048576,decompressed_limit=5242880);persistence=AdsLiveReportPersistenceService(download,repository,context.seller_id,context.marketplace_id);gate=AdsSyncGateService(readiness.settings,repository,readiness.config,readiness.approval_status)
     now=lambda:datetime.now(timezone.utc);recovery=AdsSyncRecoveryService(repository,AdsScheduledSyncConfig.from_environment().stale_run_after_hours,now)
-    return AdsManualHistoricalSyncService(readiness,gate,repository,persistence,now,recovery)
+    return AdsManualHistoricalSyncService(readiness,gate,repository,persistence,now,recovery,dependency_factory,mode,"manual" if persist else "validation",do_download,persist)
+
+def _live_report_lifecycle_validation_service():
+    context=_context();repository,_,_=_services();return _historical_report_service(repository,context,VALIDATION_SYNC_MODE,False,False)
+
+def _live_report_download_validation_service():
+    context=_context();repository,_,_=_services();return _historical_report_service(repository,context,VALIDATION_SYNC_MODE,True,False)
+
+def _manual_historical_sync_service(repository,context):return _historical_report_service(repository,context,HISTORICAL_SYNC_MODE,True,True)
 
 def _historical_sync_health_service(repository):
     settings=AdsSettings.from_environment();gate=AdsSyncGateService(settings,repository,AdsLiveReadConfig.from_environment())

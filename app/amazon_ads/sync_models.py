@@ -14,18 +14,19 @@ class AdsSyncGateResult:
 class AdsManualSyncResult:
     sync_id: str; mode: str; seller_id: str; marketplace_id: str; profile_id: str | None; start_date: date; end_date: date; started_at: datetime; finished_at: datetime | None; success: bool; status: str
     campaigns_fetched:int=0;ad_groups_fetched:int=0;keywords_fetched:int=0;targets_fetched:int=0;report_rows_received:int=0;rows_normalized:int=0;rows_saved:int=0;rows_failed:int=0;error_code:str|None=None;safe_error_message:str|None=None;trigger_source:str="manual"
+    report_id:str|None=None;report_type_id:str|None=None;amazon_report_status:str|None=None;report_created_at:datetime|None=None;report_last_checked_at:datetime|None=None;report_claim:str|None=None
     def public_dict(self):
-        result=asdict(self)
-        for field in ("start_date","end_date","started_at","finished_at"):
+        result=asdict(self);result.pop("report_id");result.pop("report_claim")
+        for field in ("start_date","end_date","started_at","finished_at","report_created_at","report_last_checked_at"):
             if result[field] is not None:result[field]=result[field].isoformat()
         return result
 
 @dataclass(frozen=True)
 class AdsManualHistoricalSyncResult:
-    status:str;run_id:str|None;started_at:datetime|None;completed_at:datetime|None;rows_persisted:int;valid_empty:bool;message:str;error_code:str|None=None
+    status:str;run_id:str|None;started_at:datetime|None;completed_at:datetime|None;rows_persisted:int;valid_empty:bool;message:str;error_code:str|None=None;amazon_report_status:str|None=None;report_created_at:datetime|None=None;report_last_checked_at:datetime|None=None
     def public_dict(self):
         result=asdict(self)
-        for field in ("started_at","completed_at"):
+        for field in ("started_at","completed_at","report_created_at","report_last_checked_at"):
             if result[field] is not None:result[field]=result[field].isoformat()
         return result
 
